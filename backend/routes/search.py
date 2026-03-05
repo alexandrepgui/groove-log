@@ -16,7 +16,8 @@ log = get_logger("routes.search")
 
 router = APIRouter()
 
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+# TODO: Re-enable file size limit once we determine the right threshold
+# MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 def _save_record(repo: MongoRepository, record: SearchRecord, start_time: float) -> None:
@@ -49,11 +50,12 @@ async def search(
     record.image_size_bytes = len(image_bytes)
     log.info("Image size: %d bytes (%.1f KB)", len(image_bytes), len(image_bytes) / 1024)
 
-    if len(image_bytes) > MAX_FILE_SIZE:
-        log.warning("Rejected: file too large (%d bytes)", len(image_bytes))
-        record.status = "error_validation"
-        _save_record(repo, record, request_start)
-        raise HTTPException(status_code=413, detail="File too large. Maximum size is 10MB.")
+    # TODO: Re-enable file size limit
+    # if len(image_bytes) > MAX_FILE_SIZE:
+    #     log.warning("Rejected: file too large (%d bytes)", len(image_bytes))
+    #     record.status = "error_validation"
+    #     _save_record(repo, record, request_start)
+    #     raise HTTPException(status_code=413, detail="File too large. Maximum size is 10MB.")
 
     try:
         response = process_single_image(image_bytes, file.content_type, media_type=media_type)
