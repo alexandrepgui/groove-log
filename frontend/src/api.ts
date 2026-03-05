@@ -1,4 +1,4 @@
-import type { Batch, BatchItem, MediaType, SearchResponse } from './types';
+import type { AuthStatus, Batch, BatchItem, MediaType, SearchResponse } from './types';
 
 export async function searchByImage(file: File, mediaType: MediaType = 'vinyl', signal?: AbortSignal): Promise<SearchResponse> {
   const formData = new FormData();
@@ -120,4 +120,27 @@ export async function undoReviewItem(itemId: string): Promise<void> {
   });
 
   if (!resp.ok) throw new Error(`Failed to undo review (${resp.status})`);
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────
+
+export async function getAuthStatus(): Promise<AuthStatus> {
+  const resp = await fetch('/api/auth/status');
+  if (!resp.ok) throw new Error(`Failed to fetch auth status (${resp.status})`);
+  return resp.json();
+}
+
+export async function startOAuthLogin(): Promise<string> {
+  const resp = await fetch('/api/auth/login');
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null);
+    throw new Error(body?.detail ?? `Failed to start login (${resp.status})`);
+  }
+  const data = await resp.json();
+  return data.authorize_url;
+}
+
+export async function logout(): Promise<void> {
+  const resp = await fetch('/api/auth/logout', { method: 'POST' });
+  if (!resp.ok) throw new Error(`Failed to logout (${resp.status})`);
 }

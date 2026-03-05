@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import './App.css';
 import { searchByImage } from './api';
 import type { MediaType, SearchResponse } from './types';
+import DiscogsAuth from './components/DiscogsAuth';
 import ImageUpload from './components/ImageUpload';
 import ResultsList from './components/ResultsList';
 import BatchView from './components/BatchView';
@@ -53,6 +54,7 @@ export default function App() {
       <header className="app-header">
         <h1>Vinyl Recko</h1>
         <p>Drop a {mediaType === 'cd' ? 'CD' : 'record label'} photo to identify your {mediaType === 'cd' ? 'CD' : 'vinyl'}</p>
+        <DiscogsAuth />
       </header>
 
       <div className="mode-tabs">

@@ -496,3 +496,46 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Discogs Auth */
+.discogs-auth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.auth-user {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.btn-auth-login {
+  background: #333;
+  color: #fff;
+  padding: 0.4rem 1rem;
+  font-size: 0.82rem;
+}
+
+.btn-auth-login:hover {
+  background: #111;
+}
+
+.btn-auth-logout {
+  background: none;
+  color: #999;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #ddd;
+}
+
+.btn-auth-logout:hover {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.auth-error {
+  font-size: 0.82rem;
+  color: #c0392b;
+}

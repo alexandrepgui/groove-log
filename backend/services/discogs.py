@@ -5,11 +5,16 @@ import requests
 
 from config import DISCOGS_BASE_URL, DISCOGS_USER_AGENT
 from logger import get_logger
+from services.discogs_auth import build_oauth_headers, get_current_tokens
 
 log = get_logger("services.discogs")
 
 
 def _headers() -> dict:
+    """Build auth headers: prefer OAuth tokens, fall back to personal token."""
+    tokens = get_current_tokens()
+    if tokens:
+        return build_oauth_headers(tokens)
     token = os.getenv("DISCOGS_TOKEN")
     return {
         "User-Agent": DISCOGS_USER_AGENT,
@@ -211,7 +216,8 @@ def get_identity() -> str:
 
 def add_to_collection(release_id: int) -> dict:
     """Add a release to the user's Discogs collection (Uncategorized folder)."""
-    username = get_identity()
+    tokens = get_current_tokens()
+    username = tokens.username if tokens and tokens.username else get_identity()
     log.info("Adding release %d to collection for user '%s'", release_id, username)
     resp = requests.post(
         f"{DISCOGS_BASE_URL}/users/{username}/collection/folders/1/releases/{release_id}",

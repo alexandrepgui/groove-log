@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from logger import get_logger, setup_logging
+from routes.auth import router as auth_router
 from routes.search import router as search_router
 from routes.batch import router as batch_router
 
@@ -23,6 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(search_router)
 app.include_router(batch_router)
 

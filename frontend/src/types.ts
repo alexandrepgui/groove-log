@@ -1,5 +1,11 @@
 export type MediaType = 'vinyl' | 'cd';
 
+export interface AuthStatus {
+  oauth_configured: boolean;
+  authenticated: boolean;
+  username: string | null;
+}
+
 export interface LabelData {
   albums: string[];
   artists: string[];

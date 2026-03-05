@@ -9,3 +9,4 @@ backend/.cache/
 .pytest_cache/
 .claude/
 img/
+DISCOGS_CREDENTIALS.md
