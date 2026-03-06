@@ -3,11 +3,11 @@
 import hashlib
 import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from conftest import FAKE_LABEL_DATA, FIXTURES_DIR
+from conftest import FAKE_LABEL_DATA, FIXTURES_DIR, make_mock_llm_client
 from services.vision import (
     _cache_path,
     _evict_if_needed,
@@ -108,20 +108,15 @@ def test_eviction_removes_oldest(isolated_cache, monkeypatch):
 
 def test_read_label_image_calls_llm_on_miss(image_bytes):
     """First call should hit the LLM and write to cache."""
-    llm_response = json.dumps(FAKE_LABEL_DATA)
+    mock_client = make_mock_llm_client([FAKE_LABEL_DATA])
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {
-        "choices": [{"message": {"content": llm_response}}]
-    }
-
-    with patch("services.vision.requests.post", return_value=mock_resp) as mock_post:
-        label_data, messages, cache_hit = read_label_image(image_bytes, "image/jpeg")
+    with patch("services.vision._get_client", return_value=mock_client):
+        label_data, messages, cache_hit, llm_response = read_label_image(image_bytes, "image/jpeg")
 
     assert label_data == FAKE_LABEL_DATA
     assert cache_hit is False
-    assert mock_post.call_count == 1
+    assert llm_response is not None
+    assert llm_response.total_tokens == 150
     # Should now be cached
     assert _read_cache(image_bytes) == FAKE_LABEL_DATA
 
@@ -130,20 +125,24 @@ def test_read_label_image_uses_cache_on_hit(image_bytes):
     """Second call with same image should skip the LLM entirely."""
     _write_cache(image_bytes, FAKE_LABEL_DATA)
 
-    with patch("services.vision.requests.post") as mock_post:
-        label_data, messages, cache_hit = read_label_image(image_bytes, "image/jpeg")
+    mock_client = make_mock_llm_client([])
+
+    with patch("services.vision._get_client", return_value=mock_client):
+        label_data, messages, cache_hit, llm_response = read_label_image(image_bytes, "image/jpeg")
 
     assert label_data == FAKE_LABEL_DATA
     assert cache_hit is True
-    mock_post.assert_not_called()
+    assert llm_response is None
 
 
 def test_cached_response_has_valid_conversation(image_bytes):
     """Cached path should still return a 2-message conversation for rank_results."""
     _write_cache(image_bytes, FAKE_LABEL_DATA)
 
-    with patch("services.vision.requests.post") as mock_post:
-        _, messages, cache_hit = read_label_image(image_bytes, "image/jpeg")
+    mock_client = make_mock_llm_client([])
+
+    with patch("services.vision._get_client", return_value=mock_client):
+        _, messages, cache_hit, _ = read_label_image(image_bytes, "image/jpeg")
 
     assert len(messages) == 2
     assert messages[0]["role"] == "user"

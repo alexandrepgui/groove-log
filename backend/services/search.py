@@ -2,13 +2,55 @@ from __future__ import annotations
 
 import time
 
-from config import DEV_MODE
+from config import DEV_MODE, LLM_PRICING
+from deps import get_repo
 from models import DiscogsResult, LabelData, SearchResponse
+from repository import LLMUsageRecord
 from services.discogs import prefilter, score_by_metadata, search_with_strategy
+from services.llm import LLMResponse
 from services.vision import rank_results, read_label_image
 from logger import get_logger
 
 log = get_logger("services.search")
+
+
+def _calculate_cost(llm_response: LLMResponse) -> float:
+    """Estimate cost in USD from token usage and known pricing."""
+    pricing = LLM_PRICING.get(llm_response.model)
+    if not pricing:
+        return 0.0
+    input_cost = llm_response.prompt_tokens * pricing["input"] / 1_000_000
+    output_cost = llm_response.completion_tokens * pricing["output"] / 1_000_000
+    return input_cost + output_cost
+
+
+def _log_llm_usage(
+    operation: str,
+    llm_response: LLMResponse | None,
+    cache_hit: bool = False,
+    batch_id: str | None = None,
+    item_id: str | None = None,
+) -> None:
+    """Persist an LLM usage record. Skip on cache hits or missing response."""
+    if cache_hit or llm_response is None:
+        return
+    try:
+        repo = get_repo()
+        record = LLMUsageRecord(
+            provider=llm_response.provider,
+            model=llm_response.model,
+            operation=operation,
+            prompt_tokens=llm_response.prompt_tokens,
+            completion_tokens=llm_response.completion_tokens,
+            total_tokens=llm_response.total_tokens,
+            cost_usd=_calculate_cost(llm_response),
+            batch_id=batch_id,
+            item_id=item_id,
+            cache_hit=False,
+        )
+        repo.save_llm_usage(record)
+    except Exception as e:
+        log.warning("Failed to log LLM usage: %s", e)
 
 
 def _build_debug(
@@ -28,15 +70,23 @@ def _build_debug(
     return debug
 
 
-def process_single_image(image_bytes: bytes, content_type: str, media_type: str = "vinyl") -> SearchResponse:
+def process_single_image(
+    image_bytes: bytes,
+    content_type: str,
+    media_type: str = "vinyl",
+    batch_id: str | None = None,
+    item_id: str | None = None,
+) -> SearchResponse:
     """Run the full search pipeline for a single image.
 
     Raises on failure (callers handle errors).
     """
     # 1. Vision — extract label data
     t0 = time.time()
-    label_data, conversation, cache_hit = read_label_image(image_bytes, content_type, media_type)
+    label_data, conversation, cache_hit, vision_usage = read_label_image(image_bytes, content_type, media_type)
     vision_ms = (time.time() - t0) * 1000
+
+    _log_llm_usage("label_reading", vision_usage, cache_hit=cache_hit, batch_id=batch_id, item_id=item_id)
 
     candidate_albums = label_data.get("albums", [])
     candidate_artists = label_data.get("artists", [])
@@ -107,9 +157,11 @@ def process_single_image(image_bytes: bytes, content_type: str, media_type: str 
 
     # 4. LLM ranking
     t2 = time.time()
-    likeliness, discarded = rank_results(releases, conversation, media_type)
+    likeliness, discarded, ranking_usage = rank_results(releases, conversation, media_type)
     ranking_ms = (time.time() - t2) * 1000
     log.info("Ranking: %d ordered, %d discarded", len(likeliness), len(discarded))
+
+    _log_llm_usage("ranking", ranking_usage, batch_id=batch_id, item_id=item_id)
 
     # 5. Build ordered results
     discarded_set = set(discarded)

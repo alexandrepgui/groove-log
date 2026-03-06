@@ -13,6 +13,15 @@ VISION_MODEL = "google/gemini-2.5-flash"
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Per-1M-token pricing (input, output) — used for cost estimation
+# Source: https://openrouter.ai/models, https://ai.google.dev/gemini-api/docs/pricing
+LLM_PRICING = {
+    "google/gemini-2.5-flash": {"input": 0.30, "output": 2.50},
+    "google/gemini-2.0-flash-lite": {"input": 0.10, "output": 0.40},
+    "openai/gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "anthropic/claude-haiku-4.5": {"input": 0.80, "output": 4.00},
+}
+
 CACHE_DIR = Path(__file__).resolve().parent / ".cache"
 CACHE_MAX_ENTRIES = 200
 

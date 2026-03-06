@@ -105,6 +105,42 @@ class BatchItem:
 
 
 @dataclass
+class LLMUsageRecord:
+    record_id: str = field(default_factory=lambda: str(uuid4()))
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    provider: str = ""  # openrouter | google
+    model: str = ""  # e.g. "google/gemini-2.5-flash"
+    operation: str = ""  # label_reading | ranking
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    batch_id: str | None = None
+    item_id: str | None = None
+    cache_hit: bool = False
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> LLMUsageRecord:
+        return cls(
+            record_id=data.get("record_id", str(uuid4())),
+            timestamp=data.get("timestamp", ""),
+            provider=data.get("provider", ""),
+            model=data.get("model", ""),
+            operation=data.get("operation", ""),
+            prompt_tokens=data.get("prompt_tokens", 0),
+            completion_tokens=data.get("completion_tokens", 0),
+            total_tokens=data.get("total_tokens", 0),
+            cost_usd=data.get("cost_usd", 0.0),
+            batch_id=data.get("batch_id"),
+            item_id=data.get("item_id"),
+            cache_hit=data.get("cache_hit", False),
+        )
+
+
+@dataclass
 class CollectionRecord:
     record_id: str = field(default_factory=lambda: str(uuid4()))
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

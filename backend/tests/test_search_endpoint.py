@@ -1,7 +1,7 @@
 """Integration tests for POST /api/search with telemetry recording.
 
 Every test mocks:
-  - LLM API (OpenRouter) via services.vision.requests.post
+  - LLM API via services.vision._get_client (provider abstraction layer)
   - Discogs API via services.discogs.requests.get
   - MongoDB repository via FastAPI dependency override
 
@@ -19,7 +19,7 @@ from conftest import (
     FAKE_LABEL_DATA,
     FAKE_RANKING,
     make_discogs_response,
-    make_llm_response,
+    make_mock_llm_client,
 )
 from models import SearchStatus
 from repository.models import SearchRecord
@@ -51,22 +51,11 @@ def _upload_file(client, content=b"fake-jpeg-data", content_type="image/jpeg", f
 
 def test_success_full_pipeline(client, mock_repo):
     """Happy path: vision → discogs → ranking → success record saved."""
-    llm_responses = [
-        make_llm_response(FAKE_LABEL_DATA),
-        make_llm_response(FAKE_RANKING),
-    ]
-    llm_call_count = 0
-
-    def mock_llm_post(*args, **kwargs):
-        nonlocal llm_call_count
-        resp = llm_responses[llm_call_count]
-        llm_call_count += 1
-        return resp
-
+    mock_client = make_mock_llm_client([FAKE_LABEL_DATA, FAKE_RANKING])
     discogs_resp = make_discogs_response([FAKE_DISCOGS_RESULT])
 
     with (
-        patch("services.vision.requests.post", side_effect=mock_llm_post),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.discogs.requests.get", return_value=discogs_resp),
         patch("services.vision._read_cache", return_value=None),
         patch("services.vision._write_cache"),
@@ -104,12 +93,14 @@ def test_invalid_content_type(client, mock_repo):
 def test_pipeline_error_on_llm_failure(client, mock_repo):
     """When the LLM is unreachable, pipeline returns 502 and records error."""
     huge_content = b"x" * 1024
+    from services.llm.base import LLMResponse
+    from unittest.mock import MagicMock
 
-    def mock_llm_fail(*args, **kwargs):
-        raise ConnectionError("LLM is down")
+    mock_client = MagicMock()
+    mock_client.chat.side_effect = ConnectionError("LLM is down")
 
     with (
-        patch("services.vision.requests.post", side_effect=mock_llm_fail),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.vision._read_cache", return_value=None),
     ):
         response = _upload_file(client, content=huge_content)
@@ -126,11 +117,13 @@ def test_pipeline_error_on_llm_failure(client, mock_repo):
 
 def test_vision_api_error(client, mock_repo):
     """Vision API failure should save error record."""
-    def mock_llm_fail(*args, **kwargs):
-        raise ConnectionError("LLM is down")
+    from unittest.mock import MagicMock
+
+    mock_client = MagicMock()
+    mock_client.chat.side_effect = ConnectionError("LLM is down")
 
     with (
-        patch("services.vision.requests.post", side_effect=mock_llm_fail),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.vision._read_cache", return_value=None),
     ):
         response = _upload_file(client)
@@ -143,23 +136,11 @@ def test_vision_api_error(client, mock_repo):
 def test_vision_returns_empty_albums_triggers_self_titled(client, mock_repo):
     """Vision succeeds with empty albums — self-titled logic kicks in, uses artist as album."""
     empty_label = {**FAKE_LABEL_DATA, "albums": [], "artists": ["Miles Davis"]}
-
-    llm_responses = [
-        make_llm_response(empty_label),
-        make_llm_response(FAKE_RANKING),
-    ]
-    llm_call_count = 0
-
-    def mock_llm_post(*args, **kwargs):
-        nonlocal llm_call_count
-        resp = llm_responses[llm_call_count]
-        llm_call_count += 1
-        return resp
-
+    mock_client = make_mock_llm_client([empty_label, FAKE_RANKING])
     discogs_resp = make_discogs_response([FAKE_DISCOGS_RESULT])
 
     with (
-        patch("services.vision.requests.post", side_effect=mock_llm_post),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.discogs.requests.get", return_value=discogs_resp),
         patch("services.vision._read_cache", return_value=None),
         patch("services.vision._write_cache"),
@@ -175,10 +156,10 @@ def test_vision_returns_empty_albums_triggers_self_titled(client, mock_repo):
 def test_vision_returns_both_empty_raises(client, mock_repo):
     """Vision returns both empty albums and artists — should raise error_vision."""
     empty_label = {**FAKE_LABEL_DATA, "albums": [], "artists": []}
-    llm_resp = make_llm_response(empty_label)
+    mock_client = make_mock_llm_client([empty_label])
 
     with (
-        patch("services.vision.requests.post", return_value=llm_resp),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.vision._read_cache", return_value=None),
         patch("services.vision._write_cache"),
     ):
@@ -195,13 +176,13 @@ def test_vision_returns_both_empty_raises(client, mock_repo):
 
 def test_discogs_api_error(client, mock_repo):
     """Discogs failure should save error record."""
-    llm_resp = make_llm_response(FAKE_LABEL_DATA)
+    mock_client = make_mock_llm_client([FAKE_LABEL_DATA])
 
     def mock_discogs_fail(*args, **kwargs):
         raise ConnectionError("Discogs is down")
 
     with (
-        patch("services.vision.requests.post", return_value=llm_resp),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.discogs.requests.get", side_effect=mock_discogs_fail),
         patch("services.vision._read_cache", return_value=None),
         patch("services.vision._write_cache"),
@@ -219,20 +200,31 @@ def test_discogs_api_error(client, mock_repo):
 
 def test_ranking_api_error(client, mock_repo):
     """Ranking failure should save error record."""
-    llm_call_count = 0
+    from services.llm.base import LLMResponse
+    from unittest.mock import MagicMock
+    import json
 
-    def mock_llm(*args, **kwargs):
-        nonlocal llm_call_count
-        llm_call_count += 1
-        if llm_call_count == 1:
-            return make_llm_response(FAKE_LABEL_DATA)
+    call_count = 0
+
+    def mock_chat(messages, model=""):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return LLMResponse(
+                content=json.dumps(FAKE_LABEL_DATA),
+                prompt_tokens=100, completion_tokens=50, total_tokens=150,
+                model=model, provider="openrouter",
+            )
         # Second call (ranking) fails
         raise ConnectionError("Ranking LLM is down")
+
+    mock_client = MagicMock()
+    mock_client.chat = mock_chat
 
     discogs_resp = make_discogs_response([FAKE_DISCOGS_RESULT])
 
     with (
-        patch("services.vision.requests.post", side_effect=mock_llm),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.discogs.requests.get", return_value=discogs_resp),
         patch("services.vision._read_cache", return_value=None),
         patch("services.vision._write_cache"),
@@ -252,22 +244,11 @@ def test_repo_save_failure_still_returns_response(client, mock_repo):
     """If MongoDB is down, the API should still return results."""
     mock_repo.save_search_record.side_effect = Exception("MongoDB connection refused")
 
-    llm_responses = [
-        make_llm_response(FAKE_LABEL_DATA),
-        make_llm_response(FAKE_RANKING),
-    ]
-    llm_call_count = 0
-
-    def mock_llm_post(*args, **kwargs):
-        nonlocal llm_call_count
-        resp = llm_responses[llm_call_count]
-        llm_call_count += 1
-        return resp
-
+    mock_client = make_mock_llm_client([FAKE_LABEL_DATA, FAKE_RANKING])
     discogs_resp = make_discogs_response([FAKE_DISCOGS_RESULT])
 
     with (
-        patch("services.vision.requests.post", side_effect=mock_llm_post),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.discogs.requests.get", return_value=discogs_resp),
         patch("services.vision._read_cache", return_value=None),
         patch("services.vision._write_cache"),
@@ -284,11 +265,11 @@ def test_repo_save_failure_still_returns_response(client, mock_repo):
 
 def test_no_discogs_results(client, mock_repo):
     """When Discogs returns empty results, record should reflect that."""
-    llm_resp = make_llm_response(FAKE_LABEL_DATA)
+    mock_client = make_mock_llm_client([FAKE_LABEL_DATA])
     empty_discogs = make_discogs_response([])
 
     with (
-        patch("services.vision.requests.post", return_value=llm_resp),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.discogs.requests.get", return_value=empty_discogs),
         patch("services.vision._read_cache", return_value=None),
         patch("services.vision._write_cache"),

@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from services.llm.base import LLMResponse
+
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 
@@ -71,14 +73,54 @@ def mock_repo():
 
 
 def make_llm_response(data):
-    """Create a mock LLM HTTP response."""
+    """Create a mock LLM HTTP response (legacy format for backward compat)."""
     resp = MagicMock()
     resp.status_code = 200
     resp.json.return_value = {
-        "choices": [{"message": {"content": json.dumps(data)}}]
+        "choices": [{"message": {"content": json.dumps(data)}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
     }
     resp.raise_for_status = MagicMock()
     return resp
+
+
+def make_llm_client_response(data):
+    """Create an LLMResponse from the abstraction layer."""
+    return LLMResponse(
+        content=json.dumps(data),
+        prompt_tokens=100,
+        completion_tokens=50,
+        total_tokens=150,
+        model="google/gemini-2.5-flash",
+        provider="openrouter",
+    )
+
+
+def make_mock_llm_client(responses):
+    """Create a mock LLM client that returns LLMResponse objects in sequence.
+
+    Args:
+        responses: list of dicts to serialize as JSON responses.
+    """
+    client = MagicMock()
+    client.provider_name = "openrouter"
+    call_idx = 0
+
+    def mock_chat(messages, model=""):
+        nonlocal call_idx
+        data = responses[call_idx]
+        call_idx += 1
+        return LLMResponse(
+            content=json.dumps(data),
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            model=model or "google/gemini-2.5-flash",
+            provider="openrouter",
+        )
+
+    client.chat = mock_chat
+    return client
 
 
 def make_discogs_response(results, pages=1):
