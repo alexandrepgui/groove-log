@@ -2,16 +2,12 @@
 
 import hashlib
 import json
-import sys
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure backend/ is on sys.path so bare imports (config, services.vision) resolve.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+from conftest import FAKE_LABEL_DATA, FIXTURES_DIR
 from services.vision import (
     _cache_path,
     _evict_if_needed,
@@ -20,18 +16,7 @@ from services.vision import (
     read_label_image,
 )
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
-SAMPLE_LABEL = FIXTURES / "sample_label.jpg"
-
-FAKE_LABEL_DATA = {
-    "albums": ["Kind of Blue"],
-    "artists": ["Miles Davis"],
-    "country": "US",
-    "format": "LP",
-    "label": "Columbia",
-    "catno": "CS 8163",
-    "year": "1959",
-}
+SAMPLE_LABEL = FIXTURES_DIR / "sample_label.jpg"
 
 
 @pytest.fixture()
@@ -57,7 +42,7 @@ def test_cache_path_deterministic(image_bytes, isolated_cache):
 
 
 def test_cache_path_uses_sha256(image_bytes, isolated_cache):
-    expected = hashlib.sha256(image_bytes).hexdigest() + ".json"
+    expected = hashlib.sha256(image_bytes + b"vinyl").hexdigest() + ".json"
     assert _cache_path(image_bytes).name == expected
 
 

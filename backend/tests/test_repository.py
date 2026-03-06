@@ -1,12 +1,8 @@
 """Tests for repository models and MongoDB repository."""
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from repository.models import SearchRecord
 

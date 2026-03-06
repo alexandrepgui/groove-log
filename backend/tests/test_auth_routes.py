@@ -96,9 +96,9 @@ class TestCallback:
         mock_identity.return_value.json.return_value = {"username": "dj_vinyl"}
         mock_identity.return_value.raise_for_status.return_value = None
 
-        resp = client.get("/api/auth/callback", params={"oauth_token": "tok", "oauth_verifier": "ver"})
-        assert resp.status_code == 200
-        assert "Connected to Discogs" in resp.text
+        resp = client.get("/api/auth/callback", params={"oauth_token": "tok", "oauth_verifier": "ver"}, follow_redirects=False)
+        assert resp.status_code == 307
+        assert "localhost:5173" in resp.headers["location"]
 
     def test_invalid_token_returns_400(self):
         resp = client.get("/api/auth/callback", params={"oauth_token": "bad", "oauth_verifier": "v"})

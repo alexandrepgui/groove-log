@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend", "backend/tests"]
+addopts = "-v"
+
+[tool.coverage.run]
+source = ["backend/services", "backend/repository", "backend/routes"]
+omit = ["backend/tests/*"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+skip_empty = true

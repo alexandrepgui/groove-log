@@ -1,4 +1,4 @@
-.PHONY: install backend frontend dev docker-dev stop test
+.PHONY: install backend frontend dev docker-dev stop test test-coverage full-test
 
 install:
 	cd backend && pip3 install --break-system-packages -r requirements.txt
@@ -21,6 +21,13 @@ docker-dev:
 
 test:
 	cd backend && python3 -m pytest tests/ -v
+
+test-coverage:
+	cd backend && python3 -m pytest tests/ -v --cov=services --cov=repository --cov=routes --cov-report=term-missing --cov-report=json --cov-fail-under=80
+	cd backend && python3 scripts/check_coverage.py --min 80 --report coverage.json
+
+full-test:
+	$(MAKE) test-coverage
 
 stop:
 	@lsof -ti:8000 | xargs kill 2>/dev/null; true

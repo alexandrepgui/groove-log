@@ -1,0 +1,187 @@
+"""Tests for services/search.py: self-titled logic, tiebreaker, safety net, _build_debug."""
+
+from unittest.mock import patch
+
+import pytest
+
+from conftest import FAKE_RANKING, make_discogs_response, make_llm_response
+from services.search import _build_debug, process_single_image
+
+# Default release used by tests that don't need custom releases.
+_DEFAULT_RELEASE = {
+    "id": 1,
+    "title": "Test Artist - Test Album",
+    "year": "2000",
+    "country": "US",
+    "format": ["Vinyl"],
+    "label": ["TestLabel"],
+    "catno": "T001",
+    "uri": "/release/1",
+    "cover_image": "https://example.com/cover.jpg",
+}
+
+
+def _run_pipeline(label_data, discogs_results=None, ranking=None):
+    """Run the search pipeline with mocked external calls."""
+    if discogs_results is None:
+        discogs_results = [_DEFAULT_RELEASE]
+    if ranking is None:
+        ranking = FAKE_RANKING
+
+    llm_responses = [make_llm_response(label_data), make_llm_response(ranking)]
+    llm_idx = 0
+
+    def mock_llm(*a, **kw):
+        nonlocal llm_idx
+        r = llm_responses[llm_idx]
+        llm_idx += 1
+        return r
+
+    discogs_resp = make_discogs_response(discogs_results)
+
+    with (
+        patch("services.vision.requests.post", side_effect=mock_llm),
+        patch("services.discogs.requests.get", return_value=discogs_resp),
+        patch("services.vision._read_cache", return_value=None),
+        patch("services.vision._write_cache"),
+    ):
+        return process_single_image(b"fake-image", "image/jpeg")
+
+
+def _make_label(albums=None, artists=None):
+    """Build a minimal label_data dict."""
+    return {
+        "albums": albums if albums is not None else ["Kind of Blue"],
+        "artists": artists if artists is not None else ["Miles Davis"],
+        "country": None, "format": None, "label": None, "catno": None, "year": None,
+    }
+
+
+# ── _build_debug ──────────────────────────────────────────────────────────────
+
+
+class TestBuildDebug:
+    def test_basic_fields(self):
+        result = _build_debug(
+            cache_hit=True,
+            strategies_tried=["s1", "s2"],
+            timing_ms={"vision": 100.0},
+            label_data={"albums": ["A"]},
+        )
+        assert result["cache_hit"] is True
+        assert result["strategies_tried"] == ["s1", "s2"]
+        assert result["timing_ms"] == {"vision": 100.0}
+        assert result["llm_label_response"] == {"albums": ["A"]}
+
+    def test_extras_merged(self):
+        result = _build_debug(
+            cache_hit=False,
+            strategies_tried=[],
+            timing_ms={},
+            label_data={},
+            prefilter={"before": 10, "after": 5},
+        )
+        assert result["prefilter"] == {"before": 10, "after": 5}
+
+
+# ── Self-titled logic ─────────────────────────────────────────────────────────
+
+
+class TestSelfTitledLogic:
+    def test_album_missing_uses_artist_as_album(self):
+        resp = _run_pipeline(_make_label(albums=["Not present in label"], artists=["Miles Davis"]))
+        assert resp.label_data.albums == ["Miles Davis"]
+
+    def test_artist_missing_uses_album_as_artist(self):
+        resp = _run_pipeline(_make_label(albums=["Kind of Blue"], artists=["Not present in label"]))
+        assert resp.label_data.artists == ["Kind of Blue"]
+
+    def test_both_missing_raises(self):
+        with pytest.raises(ValueError, match="Could not extract"):
+            _run_pipeline(_make_label(albums=["Not present in label"], artists=["Not present in label"]))
+
+    def test_empty_albums_and_artists_raises(self):
+        with pytest.raises(ValueError, match="Could not extract"):
+            _run_pipeline(_make_label(albums=[], artists=[]))
+
+    def test_sentinel_case_insensitive(self):
+        resp = _run_pipeline(_make_label(albums=["not present in label"], artists=["Miles Davis"]))
+        assert resp.label_data.albums == ["Miles Davis"]
+
+
+# ── Cover image tiebreaker ────────────────────────────────────────────────────
+
+
+class TestCoverImageTiebreaker:
+    def test_promotes_result_with_cover_image(self):
+        releases = [
+            {"id": 1, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C1", "uri": "/release/1", "cover_image": None},
+            {"id": 2, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C2", "uri": "/release/2", "cover_image": "https://example.com/cover.jpg"},
+        ]
+        resp = _run_pipeline(_make_label(), releases, {"likeliness": [0, 1], "discarded": []})
+        assert resp.results[0].cover_image == "https://example.com/cover.jpg"
+        assert resp.results[1].cover_image is None
+
+    def test_no_swap_when_first_has_cover(self):
+        releases = [
+            {"id": 1, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C1", "uri": "/release/1", "cover_image": "https://example.com/cover1.jpg"},
+            {"id": 2, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C2", "uri": "/release/2", "cover_image": "https://example.com/cover2.jpg"},
+        ]
+        resp = _run_pipeline(_make_label(), releases, {"likeliness": [0, 1], "discarded": []})
+        assert resp.results[0].discogs_id == 1
+
+    def test_no_swap_when_titles_differ(self):
+        releases = [
+            {"id": 1, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C1", "uri": "/release/1", "cover_image": None},
+            {"id": 2, "title": "Miles Davis - Bitches Brew", "year": "1970",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C2", "uri": "/release/2", "cover_image": "https://example.com/cover.jpg"},
+        ]
+        resp = _run_pipeline(_make_label(), releases, {"likeliness": [0, 1], "discarded": []})
+        assert resp.results[0].discogs_id == 1
+
+
+# ── Safety net ────────────────────────────────────────────────────────────────
+
+
+class TestSafetyNet:
+    def test_all_discarded_keeps_results(self):
+        releases = [
+            {"id": 1, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C1", "uri": "/release/1", "cover_image": "https://example.com/cover.jpg"},
+        ]
+        resp = _run_pipeline(_make_label(), releases, {"likeliness": [0], "discarded": [0]})
+        assert resp.total == 1
+        assert resp.results[0].discogs_id == 1
+
+
+# ── No results from Discogs ──────────────────────────────────────────────────
+
+
+class TestNoResults:
+    def test_empty_discogs_returns_empty(self):
+        label = _make_label()
+        llm_resp = make_llm_response(label)
+        discogs_resp = make_discogs_response([])
+
+        with (
+            patch("services.vision.requests.post", return_value=llm_resp),
+            patch("services.discogs.requests.get", return_value=discogs_resp),
+            patch("services.vision._read_cache", return_value=None),
+            patch("services.vision._write_cache"),
+        ):
+            resp = process_single_image(b"fake-image", "image/jpeg")
+
+        assert resp.total == 0
+        assert resp.results == []
