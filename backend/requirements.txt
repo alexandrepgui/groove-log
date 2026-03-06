@@ -4,6 +4,7 @@ python-multipart
 requests
 python-dotenv
 pymongo
+google-genai
 pytest
 pytest-cov
 httpx

@@ -1,10 +1,10 @@
 """Tests for services/search.py: self-titled logic, tiebreaker, safety net, _build_debug."""
 
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
-from conftest import FAKE_RANKING, make_discogs_response, make_llm_response
+from conftest import FAKE_RANKING, make_discogs_response, make_mock_llm_client
 from services.search import _build_debug, process_single_image
 
 # Default release used by tests that don't need custom releases.
@@ -28,22 +28,16 @@ def _run_pipeline(label_data, discogs_results=None, ranking=None):
     if ranking is None:
         ranking = FAKE_RANKING
 
-    llm_responses = [make_llm_response(label_data), make_llm_response(ranking)]
-    llm_idx = 0
-
-    def mock_llm(*a, **kw):
-        nonlocal llm_idx
-        r = llm_responses[llm_idx]
-        llm_idx += 1
-        return r
-
+    mock_client = make_mock_llm_client([label_data, ranking])
     discogs_resp = make_discogs_response(discogs_results)
+    mock_repo = MagicMock()
 
     with (
-        patch("services.vision.requests.post", side_effect=mock_llm),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.discogs.requests.get", return_value=discogs_resp),
         patch("services.vision._read_cache", return_value=None),
         patch("services.vision._write_cache"),
+        patch("services.search.get_repo", return_value=mock_repo),
     ):
         return process_single_image(b"fake-image", "image/jpeg")
 
@@ -172,14 +166,16 @@ class TestSafetyNet:
 class TestNoResults:
     def test_empty_discogs_returns_empty(self):
         label = _make_label()
-        llm_resp = make_llm_response(label)
+        mock_client = make_mock_llm_client([label])
         discogs_resp = make_discogs_response([])
+        mock_repo = MagicMock()
 
         with (
-            patch("services.vision.requests.post", return_value=llm_resp),
+            patch("services.vision._get_client", return_value=mock_client),
             patch("services.discogs.requests.get", return_value=discogs_resp),
             patch("services.vision._read_cache", return_value=None),
             patch("services.vision._write_cache"),
+            patch("services.search.get_repo", return_value=mock_repo),
         ):
             resp = process_single_image(b"fake-image", "image/jpeg")
 

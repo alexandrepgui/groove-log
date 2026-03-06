@@ -1,22 +1,34 @@
+from __future__ import annotations
+
 import base64
 import hashlib
 import json
 import os
-
-import requests
 
 from config import (
     CACHE_DIR,
     CACHE_MAX_ENTRIES,
     LABEL_READING_PROMPTS,
     MAX_RANKING_RESULTS,
-    OPENROUTER_URL,
     RANKING_PROMPTS,
     VISION_MODEL,
 )
 from logger import get_logger
+from services.llm import LLMResponse, get_llm_client
 
 log = get_logger("services.vision")
+
+
+# ── LLM client singleton ────────────────────────────────────────────────────
+
+_llm_client = None
+
+
+def _get_client():
+    global _llm_client
+    if _llm_client is None:
+        _llm_client = get_llm_client()
+    return _llm_client
 
 
 # ── Disk cache (LRU by mtime, keyed on image SHA-256) ───────────────────────
@@ -60,27 +72,14 @@ def _evict_if_needed() -> None:
         log.info("Cache EVICT: %s", oldest.name)
 
 
-def _api_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
-        "Content-Type": "application/json",
-    }
-
-
-def _chat(messages: list[dict]) -> tuple[str, list[dict]]:
-    """Send messages to the LLM and return (response_text, updated_messages)."""
+def _chat(messages: list[dict]) -> tuple[str, list[dict], LLMResponse]:
+    """Send messages to the LLM and return (response_text, updated_messages, llm_response)."""
+    client = _get_client()
     log.debug("LLM request: model=%s messages=%d", VISION_MODEL, len(messages))
-    resp = requests.post(
-        OPENROUTER_URL,
-        headers=_api_headers(),
-        json={"model": VISION_MODEL, "messages": messages},
-    )
-    log.debug("LLM response: status=%d", resp.status_code)
-    resp.raise_for_status()
-    content = resp.json()["choices"][0]["message"]["content"]
-    log.debug("LLM response length: %d chars", len(content))
-    messages.append({"role": "assistant", "content": content})
-    return content, messages
+    response = client.chat(messages, model=VISION_MODEL)
+    log.debug("LLM response length: %d chars", len(response.content))
+    messages.append({"role": "assistant", "content": response.content})
+    return response.content, messages, response
 
 
 def _parse_json(raw: str) -> dict | list:
@@ -94,12 +93,13 @@ def _parse_json(raw: str) -> dict | list:
         raise
 
 
-def read_label_image(image_bytes: bytes, mime_type: str, media_type: str = "vinyl") -> tuple[dict, list[dict], bool]:
-    """Extract label metadata via vision. Returns (label_data, conversation_messages, cache_hit).
+def read_label_image(
+    image_bytes: bytes, mime_type: str, media_type: str = "vinyl",
+) -> tuple[dict, list[dict], bool, LLMResponse | None]:
+    """Extract label metadata via vision.
 
-    Results are cached on disk keyed by image SHA-256 + media_type. On cache hit
-    the LLM call is skipped entirely and a synthetic conversation is reconstructed
-    so that downstream rank_results() still works.
+    Returns (label_data, conversation_messages, cache_hit, llm_response).
+    llm_response is None on cache hits.
     """
     log.info("Reading label image: size=%d bytes, mime=%s, media_type=%s", len(image_bytes), mime_type, media_type)
 
@@ -118,7 +118,7 @@ def read_label_image(image_bytes: bytes, mime_type: str, media_type: str = "viny
             },
             {"role": "assistant", "content": json.dumps(cached)},
         ]
-        return cached, messages, True
+        return cached, messages, True, None
 
     b64_image = base64.b64encode(image_bytes).decode()
 
@@ -135,7 +135,7 @@ def read_label_image(image_bytes: bytes, mime_type: str, media_type: str = "viny
         }
     ]
 
-    raw, messages = _chat(messages)
+    raw, messages, llm_response = _chat(messages)
     label_data = _parse_json(raw)
     log.info(
         "Label extracted: albums=%s artists=%s",
@@ -144,17 +144,17 @@ def read_label_image(image_bytes: bytes, mime_type: str, media_type: str = "viny
 
     _write_cache(image_bytes, label_data, media_type)
 
-    return label_data, messages, False
+    return label_data, messages, False, llm_response
 
 
 def rank_results(
     releases: list[dict],
     conversation: list[dict],
     media_type: str = "vinyl",
-) -> tuple[list[int], list[int]]:
+) -> tuple[list[int], list[int], LLMResponse]:
     """Ask the LLM to rank Discogs results using the same conversation context.
 
-    Returns (likeliness_indexes, discarded_indexes).
+    Returns (likeliness_indexes, discarded_indexes, llm_response).
     """
     candidates = []
     for i, r in enumerate(releases[:MAX_RANKING_RESULTS]):
@@ -175,9 +175,9 @@ def rank_results(
         "content": f"{RANKING_PROMPTS[media_type]}\n\n{json.dumps(candidates, indent=2)}",
     })
 
-    raw, _ = _chat(conversation)
+    raw, _, llm_response = _chat(conversation)
     result = _parse_json(raw)
     likeliness = result.get("likeliness", [])
     discarded = result.get("discarded", [])
     log.info("Ranking complete: %d ordered, %d discarded", len(likeliness), len(discarded))
-    return likeliness, discarded
+    return likeliness, discarded, llm_response

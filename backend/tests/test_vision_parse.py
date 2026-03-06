@@ -1,10 +1,11 @@
 """Tests for services/vision.py: _parse_json and rank_results."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
+from conftest import make_mock_llm_client
 from services.vision import _parse_json, rank_results
 
 
@@ -49,19 +50,14 @@ class TestRankResults:
             {"role": "assistant", "content": "test"},
         ]
         ranking_response = {"likeliness": [0], "discarded": []}
+        mock_client = make_mock_llm_client([ranking_response])
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": json.dumps(ranking_response)}}]
-        }
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("services.vision.requests.post", return_value=mock_resp):
-            likeliness, discarded = rank_results(releases, conversation)
+        with patch("services.vision._get_client", return_value=mock_client):
+            likeliness, discarded, llm_response = rank_results(releases, conversation)
 
         assert likeliness == [0]
         assert discarded == []
+        assert llm_response.total_tokens == 150
 
     def test_truncates_to_max_ranking_results(self):
         """Only first MAX_RANKING_RESULTS candidates should be ranked."""
@@ -74,16 +70,10 @@ class TestRankResults:
         ]
         # LLM returns indices 0..19 — matching MAX_RANKING_RESULTS
         ranking_response = {"likeliness": list(range(20)), "discarded": []}
+        mock_client = make_mock_llm_client([ranking_response])
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": json.dumps(ranking_response)}}]
-        }
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("services.vision.requests.post", return_value=mock_resp):
-            likeliness, discarded = rank_results(releases, conversation)
+        with patch("services.vision._get_client", return_value=mock_client):
+            likeliness, discarded, llm_response = rank_results(releases, conversation)
 
         # Verify the returned indices are within MAX_RANKING_RESULTS bounds
         assert likeliness == list(range(20))

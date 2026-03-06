@@ -6,7 +6,7 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 
 from logger import get_logger
-from .models import Batch, BatchItem, CollectionRecord, SearchRecord
+from .models import Batch, BatchItem, CollectionRecord, LLMUsageRecord, SearchRecord
 
 log = get_logger("repository.mongo")
 
@@ -21,6 +21,7 @@ class MongoRepository:
         self._collection_records: Collection = self._db["collection_records"]
         self._batches: Collection = self._db["batches"]
         self._items: Collection = self._db["batch_items"]
+        self._llm_usage: Collection = self._db["llm_usage"]
         log.info("MongoDB repository: db=%s", database)
 
     # ── Search telemetry ──────────────────────────────────────────────────
@@ -154,3 +155,65 @@ class MongoRepository:
                 "accepted_release_id": accepted_release_id,
             }},
         )
+
+    # ── LLM usage tracking ────────────────────────────────────────────────
+
+    def save_llm_usage(self, record: LLMUsageRecord) -> None:
+        doc = record.to_dict()
+        self._llm_usage.replace_one(
+            {"record_id": record.record_id}, doc, upsert=True,
+        )
+        log.debug("Saved LLM usage %s (op=%s cost=$%.6f)", record.record_id, record.operation, record.cost_usd)
+
+    def get_usage_summary(self, days: int = 30) -> dict:
+        """Aggregate LLM usage stats over the last N days."""
+        cutoff = datetime.now(timezone.utc)
+        cutoff = cutoff.replace(hour=0, minute=0, second=0, microsecond=0)
+        from datetime import timedelta
+        cutoff_str = (cutoff - timedelta(days=days)).isoformat()
+
+        match_stage = {"$match": {"timestamp": {"$gte": cutoff_str}, "cache_hit": False}}
+
+        pipeline = [
+            match_stage,
+            {"$facet": {
+                "totals": [{"$group": {
+                    "_id": None,
+                    "total_calls": {"$sum": 1},
+                    "total_tokens": {"$sum": "$total_tokens"},
+                    "total_cost_usd": {"$sum": "$cost_usd"},
+                }}],
+                "by_day": [{"$group": {
+                    "_id": {"$substr": ["$timestamp", 0, 10]},
+                    "requests": {"$sum": 1},
+                    "cost_usd": {"$sum": "$cost_usd"},
+                }}, {"$sort": {"_id": 1}}],
+                "by_model": [{"$group": {
+                    "_id": "$model",
+                    "requests": {"$sum": 1},
+                    "cost_usd": {"$sum": "$cost_usd"},
+                }}],
+                "by_operation": [{"$group": {
+                    "_id": "$operation",
+                    "requests": {"$sum": 1},
+                    "tokens": {"$sum": "$total_tokens"},
+                    "cost_usd": {"$sum": "$cost_usd"},
+                }}],
+            }},
+        ]
+
+        result = list(self._llm_usage.aggregate(pipeline))
+        if not result:
+            return {"period_days": days, "totals": {}, "by_day": [], "by_model": [], "by_operation": []}
+
+        facets = result[0]
+        totals_raw = facets["totals"][0] if facets["totals"] else {}
+        totals_raw.pop("_id", None)
+
+        return {
+            "period_days": days,
+            "totals": totals_raw or {"total_calls": 0, "total_tokens": 0, "total_cost_usd": 0.0},
+            "by_day": [{"date": d["_id"], "requests": d["requests"], "cost_usd": d["cost_usd"]} for d in facets["by_day"]],
+            "by_model": [{"model": d["_id"], "requests": d["requests"], "cost_usd": d["cost_usd"]} for d in facets["by_model"]],
+            "by_operation": [{"operation": d["_id"], "requests": d["requests"], "tokens": d["tokens"], "cost_usd": d["cost_usd"]} for d in facets["by_operation"]],
+        }

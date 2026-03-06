@@ -11,6 +11,7 @@ from logger import get_logger, setup_logging
 from routes.auth import router as auth_router
 from routes.search import router as search_router
 from routes.batch import router as batch_router
+from routes.usage import router as usage_router
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=True)
 setup_logging()
@@ -29,6 +30,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(search_router)
 app.include_router(batch_router)
+app.include_router(usage_router)
 
 UPLOADS_DIR.mkdir(exist_ok=True)
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
