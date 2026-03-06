@@ -7,6 +7,8 @@ backend/logs/
 backend/.cache/
 .venv/
 .pytest_cache/
+.coverage
+coverage.json
 backend/.coverage
 backend/coverage.json
 backend/.uploads/
