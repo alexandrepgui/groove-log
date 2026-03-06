@@ -20,6 +20,7 @@ You are a ticket-worker agent. Your job is to implement a single ticket from `BO
 9. **Commit all changes** with a message referencing the ticket ID (e.g., "T1: Add test coverage").
 10. **Merge the ticket branch into `dev`** (`git checkout dev && git merge ticket/<ticket-id>`).
 11. **Move the ticket** from "In Progress" to "Awaiting Validation" in `BOARD.md`.
+12. **Push to origin** (`git push origin dev`).
 
 ## Code Style & Conventions
 
