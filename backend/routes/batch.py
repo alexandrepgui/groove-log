@@ -12,6 +12,7 @@ from models import ItemStatus, MediaType, ReviewAction, ReviewStatus
 from repository import Batch, BatchItem, SearchRecord
 from repository.mongo import MongoRepository
 from services.search import process_single_image
+from services.vision import invalidate_cache
 from utils import save_upload_image
 
 log = get_logger("routes.batch")
@@ -184,4 +185,55 @@ async def undo_review_item(item_id: str, repo: MongoRepository = Depends(get_rep
     if not item:
         raise HTTPException(404, "Item not found.")
     repo.update_item_review(item_id, ReviewStatus.UNREVIEWED, None)
+    return {"ok": True}
+
+
+def _reprocess_item(item_id: str, image_bytes: bytes, content_type: str) -> None:
+    """Background task: re-run the processing pipeline for a single item."""
+    repo = get_repo()
+    try:
+        repo.update_item_status(item_id, "processing")
+        response = process_single_image(image_bytes, content_type, media_type="vinyl")
+        repo.update_item_completed(
+            item_id,
+            label_data=response.label_data.model_dump(),
+            results=[r.model_dump() for r in response.results],
+            strategy=response.strategy,
+            debug=response.debug,
+        )
+    except Exception as e:
+        log.error("Retry item %s failed: %s", item_id, e, exc_info=True)
+        repo.update_item_error(item_id, str(e))
+
+
+@router.post("/api/review/items/{item_id}/retry")
+async def retry_item(
+    item_id: str,
+    background_tasks: BackgroundTasks,
+    repo: MongoRepository = Depends(get_repo),
+):
+    item = repo.find_item(item_id)
+    if not item:
+        raise HTTPException(404, "Item not found.")
+    if not item.image_url:
+        raise HTTPException(422, "No saved image to reprocess.")
+
+    # Resolve image path from URL (e.g. /api/uploads/abc.jpg → .uploads/abc.jpg)
+    filename = item.image_url.rsplit("/", 1)[-1]
+    image_path = UPLOADS_DIR / filename
+    if not image_path.is_file():
+        raise HTTPException(422, "Image file not found on disk.")
+
+    image_bytes = image_path.read_bytes()
+    ext = image_path.suffix.lower()
+    content_type = _EXT_TO_MIME.get(ext, "image/jpeg")
+
+    # Invalidate LLM cache so the image is re-analysed from scratch
+    invalidate_cache(image_bytes)
+
+    # Reset item state
+    repo.update_item_status(item_id, "pending")
+    repo.update_item_review(item_id, ReviewStatus.UNREVIEWED, None)
+
+    background_tasks.add_task(_reprocess_item, item_id, image_bytes, content_type)
     return {"ok": True}

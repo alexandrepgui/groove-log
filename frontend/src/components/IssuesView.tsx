@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getAllReviewItems, reviewItemGlobal, undoReviewItem } from '../api';
+import { getAllReviewItems, reviewItemGlobal, retryItem } from '../api';
 import type { BatchItem } from '../types';
 
 export default function IssuesView() {
@@ -48,7 +48,7 @@ export default function IssuesView() {
   const handleRetry = async (itemId: string) => {
     setActionLoading(itemId);
     try {
-      await undoReviewItem(itemId);
+      await retryItem(itemId);
       removeItem(itemId);
     } finally {
       setActionLoading(null);
@@ -147,6 +147,13 @@ export default function IssuesView() {
                   )}
                 </div>
                 <div className="issues-card-actions">
+                  <button
+                    className="btn btn-show-more"
+                    disabled={actionLoading === item.item_id}
+                    onClick={() => handleRetry(item.item_id)}
+                  >
+                    Retry
+                  </button>
                   <button
                     className="btn btn-dismiss"
                     disabled={actionLoading === item.item_id}

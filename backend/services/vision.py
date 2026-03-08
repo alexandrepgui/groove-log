@@ -62,6 +62,16 @@ def _write_cache(image_bytes: bytes, label_data: dict, media_type: str = "vinyl"
     log.info("Cache WRITE: %s", path.name)
 
 
+def invalidate_cache(image_bytes: bytes, media_type: str = "vinyl") -> bool:
+    """Remove the cache entry for the given image. Returns True if a file was deleted."""
+    path = _cache_path(image_bytes, media_type)
+    if path.exists():
+        path.unlink()
+        log.info("Cache INVALIDATE: %s", path.name)
+        return True
+    return False
+
+
 def _evict_if_needed() -> None:
     from pathlib import Path
     cache_dir = Path(CACHE_DIR)

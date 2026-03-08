@@ -126,6 +126,17 @@ export async function undoReviewItem(itemId: string): Promise<void> {
   if (!resp.ok) throw new Error(`Failed to undo review (${resp.status})`);
 }
 
+export async function retryItem(itemId: string): Promise<void> {
+  const resp = await fetch(`/api/review/items/${itemId}/retry`, {
+    method: 'POST',
+  });
+
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null);
+    throw new Error(body?.detail ?? `Failed to retry item (${resp.status})`);
+  }
+}
+
 // ── Collection (browse) ──────────────────────────────────────────────────
 
 export async function getCollection(
