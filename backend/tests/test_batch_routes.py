@@ -336,6 +336,8 @@ def test_retry_item_success(client, mock_repo):
     with (
         patch("routes.batch.UPLOADS_DIR") as mock_dir,
         patch("routes.batch.invalidate_cache"),
+        patch("routes.batch.get_repo", return_value=mock_repo),
+        patch("routes.batch.process_single_image", return_value=_make_fake_response()),
     ):
         mock_path = MagicMock()
         mock_path.is_file.return_value = True
@@ -347,7 +349,11 @@ def test_retry_item_success(client, mock_repo):
 
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
-    mock_repo.update_item_status.assert_called_once_with("i1", "pending")
+    # Route sets "pending", then background task sets "processing"
+    assert mock_repo.update_item_status.call_args_list == [
+        (("i1", "pending"),),
+        (("i1", "processing"),),
+    ]
 
 
 def test_retry_item_not_found(client, mock_repo):
