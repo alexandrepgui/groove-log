@@ -186,7 +186,12 @@ def rank_results(
     })
 
     raw, _, llm_response = _chat(conversation)
-    result = _parse_json(raw)
+    try:
+        result = _parse_json(raw)
+    except json.JSONDecodeError:
+        log.warning("LLM returned non-JSON during ranking, treating as 'discard all'")
+        all_indexes = list(range(len(candidates)))
+        return [], all_indexes, llm_response
     likeliness = result.get("likeliness", [])
     discarded = result.get("discarded", [])
     log.info("Ranking complete: %d ordered, %d discarded", len(likeliness), len(discarded))

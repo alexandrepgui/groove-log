@@ -127,6 +127,7 @@ def make_discogs_response(results, pages=1):
     """Create a mock Discogs HTTP response."""
     resp = MagicMock()
     resp.status_code = 200
+    resp.headers = {"X-Discogs-Ratelimit-Remaining": "50"}
     resp.json.return_value = {
         "results": results,
         "pagination": {"pages": pages},

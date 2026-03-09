@@ -9,6 +9,7 @@ export interface AuthStatus {
 export interface LabelData {
   albums: string[];
   artists: string[];
+  tracks: string[] | null;
   country: string | null;
   format: string | null;
   label: string | null;

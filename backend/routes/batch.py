@@ -53,7 +53,7 @@ def _process_batch(
         request_start = time.time()
         try:
             repo.update_item_status(item_id, "processing")
-            response = process_single_image(image_bytes, content_type, media_type=media_type)
+            response = process_single_image(image_bytes, content_type, media_type=media_type, batch_id=batch_id, item_id=item_id)
             repo.update_item_completed(
                 item_id,
                 label_data=response.label_data.model_dump(),
@@ -65,9 +65,13 @@ def _process_batch(
             record.status = "success"
             record.total_returned = response.total
             record.top_match_title = response.results[0].title if response.results else None
+        except ValueError as e:
+            log.error("Batch item %s failed (validation): %s", item_id, e)
+            repo.update_item_error(item_id, str(e))
+            repo.increment_batch_failed(batch_id)
         except Exception as e:
             log.error("Batch item %s failed: %s", item_id, e, exc_info=True)
-            repo.update_item_error(item_id, str(e))
+            repo.update_item_error(item_id, "Search pipeline error. Check server logs for details.")
             repo.increment_batch_failed(batch_id)
             record.status = "error_pipeline"
         finally:
@@ -188,12 +192,12 @@ async def undo_review_item(item_id: str, repo: MongoRepository = Depends(get_rep
     return {"ok": True}
 
 
-def _reprocess_item(item_id: str, image_bytes: bytes, content_type: str) -> None:
+def _reprocess_item(item_id: str, image_bytes: bytes, content_type: str, batch_id: str | None = None) -> None:
     """Background task: re-run the processing pipeline for a single item."""
     repo = get_repo()
     try:
         repo.update_item_status(item_id, "processing")
-        response = process_single_image(image_bytes, content_type, media_type="vinyl")
+        response = process_single_image(image_bytes, content_type, media_type="vinyl", batch_id=batch_id, item_id=item_id)
         repo.update_item_completed(
             item_id,
             label_data=response.label_data.model_dump(),
@@ -201,9 +205,12 @@ def _reprocess_item(item_id: str, image_bytes: bytes, content_type: str) -> None
             strategy=response.strategy,
             debug=response.debug,
         )
+    except ValueError as e:
+        log.error("Retry item %s failed (validation): %s", item_id, e)
+        repo.update_item_error(item_id, str(e))
     except Exception as e:
         log.error("Retry item %s failed: %s", item_id, e, exc_info=True)
-        repo.update_item_error(item_id, str(e))
+        repo.update_item_error(item_id, "Search pipeline error. Check server logs for details.")
 
 
 @router.post("/api/review/items/{item_id}/retry")
@@ -235,5 +242,5 @@ async def retry_item(
     repo.update_item_status(item_id, "pending")
     repo.update_item_review(item_id, ReviewStatus.UNREVIEWED, None)
 
-    background_tasks.add_task(_reprocess_item, item_id, image_bytes, content_type)
+    background_tasks.add_task(_reprocess_item, item_id, image_bytes, content_type, item.batch_id)
     return {"ok": True}

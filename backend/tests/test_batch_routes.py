@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from repository import Batch, BatchItem
-from routes.batch import _process_batch
+from routes.batch import _process_batch, _reprocess_item
 
 
 @pytest.fixture()
@@ -285,7 +285,7 @@ def test_process_batch_item_failure():
     ):
         _process_batch("b1", items, filenames)
 
-    repo.update_item_error.assert_called_once_with("item1", "boom")
+    repo.update_item_error.assert_called_once_with("item1", "Search pipeline error. Check server logs for details.")
     repo.increment_batch_failed.assert_called_once_with("b1")
     repo.update_batch_status.assert_called_once_with("b1", "completed")
 
@@ -307,3 +307,94 @@ def test_process_batch_telemetry_save_failure():
 
     # Batch should still complete despite telemetry failure
     repo.update_batch_status.assert_called_once_with("b1", "completed")
+
+
+def test_process_batch_validation_error():
+    """ValueError should store the original message (our own validation)."""
+    repo = MagicMock()
+    items = [("item1", b"jpeg-data", "image/jpeg")]
+    filenames = {"item1": "label.jpg"}
+
+    with (
+        patch("routes.batch.get_repo", return_value=repo),
+        patch("routes.batch.process_single_image", side_effect=ValueError("Could not extract album")),
+        patch("routes.batch.time.sleep"),
+    ):
+        _process_batch("b1", items, filenames)
+
+    repo.update_item_error.assert_called_once_with("item1", "Could not extract album")
+    repo.increment_batch_failed.assert_called_once_with("b1")
+
+
+# ── Retry / reprocess ──────────────────────────────────────────────────────
+
+
+def test_retry_item_success(client, mock_repo):
+    mock_repo.find_item.return_value = BatchItem(
+        item_id="i1", batch_id="b1", image_url="/api/uploads/i1.jpg",
+    )
+    with (
+        patch("routes.batch.UPLOADS_DIR") as mock_dir,
+        patch("routes.batch.invalidate_cache"),
+    ):
+        mock_path = MagicMock()
+        mock_path.is_file.return_value = True
+        mock_path.read_bytes.return_value = b"jpeg-data"
+        mock_path.suffix = ".jpg"
+        mock_dir.__truediv__ = MagicMock(return_value=mock_path)
+
+        resp = client.post("/api/review/items/i1/retry")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    mock_repo.update_item_status.assert_called_once_with("i1", "pending")
+
+
+def test_retry_item_not_found(client, mock_repo):
+    mock_repo.find_item.return_value = None
+    resp = client.post("/api/review/items/i1/retry")
+    assert resp.status_code == 404
+
+
+def test_retry_item_no_image(client, mock_repo):
+    mock_repo.find_item.return_value = BatchItem(item_id="i1", batch_id="b1", image_url=None)
+    resp = client.post("/api/review/items/i1/retry")
+    assert resp.status_code == 422
+
+
+def test_reprocess_item_success():
+    repo = MagicMock()
+    fake_resp = _make_fake_response()
+
+    with (
+        patch("routes.batch.get_repo", return_value=repo),
+        patch("routes.batch.process_single_image", return_value=fake_resp),
+    ):
+        _reprocess_item("i1", b"jpeg-data", "image/jpeg", batch_id="b1")
+
+    repo.update_item_status.assert_called_once_with("i1", "processing")
+    repo.update_item_completed.assert_called_once()
+
+
+def test_reprocess_item_validation_error():
+    repo = MagicMock()
+
+    with (
+        patch("routes.batch.get_repo", return_value=repo),
+        patch("routes.batch.process_single_image", side_effect=ValueError("bad label")),
+    ):
+        _reprocess_item("i1", b"jpeg-data", "image/jpeg")
+
+    repo.update_item_error.assert_called_once_with("i1", "bad label")
+
+
+def test_reprocess_item_unexpected_error():
+    repo = MagicMock()
+
+    with (
+        patch("routes.batch.get_repo", return_value=repo),
+        patch("routes.batch.process_single_image", side_effect=RuntimeError("boom")),
+    ):
+        _reprocess_item("i1", b"jpeg-data", "image/jpeg")
+
+    repo.update_item_error.assert_called_once_with("i1", "Search pipeline error. Check server logs for details.")

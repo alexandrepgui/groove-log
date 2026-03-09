@@ -34,6 +34,26 @@ class MongoRepository:
             ("artist", "text"),
         ], name="collection_text_search")
 
+    # ── OAuth tokens ─────────────────────────────────────────────────────
+
+    def save_oauth_tokens(self, access_token: str, access_token_secret: str, username: str | None) -> None:
+        self._db["oauth_tokens"].replace_one(
+            {"_id": "discogs"},
+            {"_id": "discogs", "access_token": access_token, "access_token_secret": access_token_secret, "username": username},
+            upsert=True,
+        )
+        log.info("OAuth tokens persisted for user=%s", username)
+
+    def load_oauth_tokens(self) -> dict | None:
+        doc = self._db["oauth_tokens"].find_one({"_id": "discogs"})
+        if doc:
+            return {"access_token": doc["access_token"], "access_token_secret": doc["access_token_secret"], "username": doc.get("username")}
+        return None
+
+    def delete_oauth_tokens(self) -> None:
+        self._db["oauth_tokens"].delete_one({"_id": "discogs"})
+        log.info("OAuth tokens deleted")
+
     # ── Collection items (persisted Discogs collection) ────────────────────
 
     def upsert_collection_items_bulk(self, items: list[CollectionItem]) -> int:
@@ -221,7 +241,10 @@ class MongoRepository:
         }
         if debug is not None:
             update["debug"] = debug
-        self._items.update_one({"item_id": item_id}, {"$set": update})
+        self._items.update_one(
+            {"item_id": item_id},
+            {"$set": update, "$unset": {"error": ""}},
+        )
 
     def update_item_error(self, item_id: str, error: str) -> None:
         self._items.update_one(

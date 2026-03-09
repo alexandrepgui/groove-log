@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCollection, getCollectionSyncStatus, triggerCollectionSync } from '../api';
 import type { CollectionItem, SyncStatus } from '../types';
+import ZoomableImage from './ZoomableImage';
 
 const PAGE_SIZE = 50;
 
@@ -243,7 +244,7 @@ export default function CollectionView() {
             {items.map((item) => (
               <div key={`${item.release_id}-${item.instance_id}`} className="collection-card">
                 {item.cover_image ? (
-                  <img
+                  <ZoomableImage
                     src={item.cover_image}
                     alt={item.title}
                     className="collection-cover"

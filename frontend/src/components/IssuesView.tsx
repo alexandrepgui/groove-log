@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getAllReviewItems, reviewItemGlobal, retryItem } from '../api';
 import type { BatchItem } from '../types';
+import ZoomableImage from './ZoomableImage';
 
 export default function IssuesView() {
   const [wrongItems, setWrongItems] = useState<BatchItem[]>([]);
@@ -15,7 +16,7 @@ export default function IssuesView() {
     try {
       const [wrong, errored] = await Promise.all([
         getAllReviewItems('wrong'),
-        getAllReviewItems(undefined, 'error'),
+        getAllReviewItems('unreviewed', 'error'),
       ]);
       setWrongItems(wrong);
       setErrorItems(errored);
@@ -86,7 +87,7 @@ export default function IssuesView() {
             {wrongItems.map((item) => (
               <div key={item.item_id} className="issues-card">
                 {item.image_url && (
-                  <img
+                  <ZoomableImage
                     src={item.image_url}
                     alt={item.image_filename}
                     className="issues-card-image"
@@ -134,7 +135,7 @@ export default function IssuesView() {
             {errorItems.map((item) => (
               <div key={item.item_id} className="issues-card">
                 {item.image_url && (
-                  <img
+                  <ZoomableImage
                     src={item.image_url}
                     alt={item.image_filename}
                     className="issues-card-image"

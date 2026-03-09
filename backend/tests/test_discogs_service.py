@@ -1,10 +1,14 @@
-"""Tests for services/discogs.py: prefilter, score_by_metadata, _sanity_check, _best_similarity."""
+"""Tests for services/discogs.py: prefilter, score_by_metadata, _sanity_check, _best_similarity, _normalize_catno."""
+
+from unittest.mock import patch
 
 from services.discogs import (
     _best_similarity,
+    _normalize_catno,
     _sanity_check,
     prefilter,
     score_by_metadata,
+    generate_search_candidates,
 )
 
 
@@ -213,3 +217,90 @@ class TestScoreByMetadata:
         ]
         result = score_by_metadata(releases, {"year": "1959", "country": "US"})
         assert len(result) == 2
+
+
+# ── _normalize_catno ─────────────────────────────────────────────────────────
+
+
+class TestCatnoNormalization:
+    def test_strip_side_a(self):
+        assert _normalize_catno("BR 36.149-A") == ["BR 36.149-A", "BR 36.149", "BR 36149"]
+
+    def test_strip_side_b(self):
+        assert _normalize_catno("31C 052 422805 B") == ["31C 052 422805 B", "31C 052 422805"]
+
+    def test_dots_removal_without_side(self):
+        assert _normalize_catno("201.404.007") == ["201.404.007", "201404007"]
+
+    def test_side_suffix_with_dots(self):
+        assert _normalize_catno("201.404.007-A") == ["201.404.007-A", "201.404.007", "201404007"]
+
+    def test_no_change(self):
+        assert _normalize_catno("F0019") == ["F0019"]
+
+    def test_numeric_suffix_preserved(self):
+        """'-2' is NOT a side indicator, should not be stripped."""
+        assert _normalize_catno("510 022-2") == ["510 022-2"]
+
+    def test_case_insensitive_side(self):
+        assert _normalize_catno("ABC-a") == ["ABC-a", "ABC"]
+
+    def test_side_with_space(self):
+        assert _normalize_catno("XYZ 123 A") == ["XYZ 123 A", "XYZ 123"]
+
+
+# ── self-titled dedup ────────────────────────────────────────────────────────
+
+
+class TestSelfTitledDedup:
+    @patch("services.discogs.discogs_search")
+    def test_self_titled_no_duplicate(self, mock_search):
+        """When album == artist, query should not duplicate the name."""
+        mock_search.return_value = [{"title": "Di Melo - Di Melo"}]
+        results, strategy = next(generate_search_candidates(
+            candidate_albums=["Di Melo"],
+            candidate_artists=["Di Melo"],
+            label_meta={},
+            media_type="vinyl",
+        ))
+        # Check that the q= search used deduplicated query
+        calls = mock_search.call_args_list
+        for call in calls:
+            if "q" in call.kwargs:
+                assert call.kwargs["q"] == "Di Melo"
+                break
+        assert "self-titled" in strategy
+
+    @patch("services.discogs.discogs_search")
+    def test_different_artist_album_not_deduped(self, mock_search):
+        """When album != artist, query should contain both."""
+        mock_search.return_value = [{"title": "Miles Davis - Kind of Blue"}]
+        results, strategy = next(generate_search_candidates(
+            candidate_albums=["Kind of Blue"],
+            candidate_artists=["Miles Davis"],
+            label_meta={},
+            media_type="vinyl",
+        ))
+        calls = mock_search.call_args_list
+        for call in calls:
+            if "q" in call.kwargs:
+                assert call.kwargs["q"] == "Miles Davis Kind of Blue"
+                break
+        assert "self-titled" not in strategy
+
+
+# ── sanity check: short-string false positives ───────────────────────────────
+
+
+class TestSanityCheckThreshold:
+    def test_metallica_vs_jim_trahan_blocked(self):
+        """Short-string false positive should be blocked at threshold 0.5."""
+        results = [{"title": "Jim Trahan - Some Album"}]
+        passed = _sanity_check(results, ["Metallica"], ["Metallica"])
+        assert len(passed) == 0
+
+    def test_miles_davis_quintet_passes(self):
+        """Legitimate partial match should still pass."""
+        results = [{"title": "Miles Davis Quintet - Relaxin'"}]
+        passed = _sanity_check(results, ["Relaxin'"], ["Miles Davis"])
+        assert len(passed) == 1

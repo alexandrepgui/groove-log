@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { addToCollection, reviewItemGlobal, undoReviewItem } from '../api';
 import type { BatchItem, DebugInfo } from '../types';
 import ResultCard from './ResultCard';
+import ZoomableImage from './ZoomableImage';
 
 interface Props {
   items: BatchItem[];
@@ -316,7 +317,7 @@ export default function BatchReview({ items, onDone }: Props) {
 
       {item.image_url && (
         <div className="batch-review-photo-wrapper">
-          <img
+          <ZoomableImage
             src={item.image_url}
             alt={item.image_filename}
             className="batch-review-photo"

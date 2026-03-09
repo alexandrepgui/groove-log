@@ -31,7 +31,7 @@ export default function BatchUpload({ onBatchCreated, mediaType = 'vinyl' }: Pro
         setIsUploading(false);
       }
     },
-    [onBatchCreated],
+    [onBatchCreated, mediaType],
   );
 
   const onDrop = useCallback(

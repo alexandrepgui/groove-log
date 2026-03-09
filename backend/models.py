@@ -33,6 +33,7 @@ class ReviewStatus(StrEnum):
 class LabelData(BaseModel):
     albums: list[str]
     artists: list[str]
+    tracks: list[str] | None = None
     country: str | None = None
     format: str | None = None
     label: str | None = None
