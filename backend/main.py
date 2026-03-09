@@ -29,7 +29,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from services.discogs_auth import OAuthTokens, set_tokens
 
     try:
-        saved = get_repo().load_oauth_tokens()
+        # Respect dependency overrides (e.g. in tests)
+        repo_factory = app.dependency_overrides.get(get_repo, get_repo)
+        repo = repo_factory()
+        saved = repo.load_oauth_tokens()
     except Exception as e:
         log.warning("Could not load OAuth tokens from DB: %s", e)
         saved = None
