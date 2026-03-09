@@ -125,12 +125,24 @@ function AppInner() {
             className={`media-type-btn ${mediaType === 'vinyl' ? 'active' : ''}`}
             onClick={() => setMediaType('vinyl')}
           >
+            <svg className="media-type-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="12" cy="12" r="10" />
+              <circle cx="12" cy="12" r="3" />
+              <circle cx="12" cy="12" r="5.5" fill="none" opacity="0.3" />
+              <circle cx="12" cy="12" r="7.5" fill="none" opacity="0.3" />
+            </svg>
             Vinyl
           </button>
           <button
             className={`media-type-btn ${mediaType === 'cd' ? 'active' : ''}`}
             onClick={() => setMediaType('cd')}
           >
+            <svg className="media-type-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="12" cy="12" r="10" />
+              <circle cx="12" cy="12" r="2" />
+              <path d="M12 7.5 A4.5 4.5 0 0 1 16.5 12" opacity="0.4" />
+              <circle cx="12" cy="12" r="4.5" fill="none" opacity="0.3" />
+            </svg>
             CD
           </button>
         </div>

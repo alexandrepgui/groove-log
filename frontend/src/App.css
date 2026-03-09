@@ -304,6 +304,9 @@
 }
 
 .media-type-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   padding: 0.4rem 1.2rem;
   border: 1px solid #ccc;
   background: #fff;
@@ -312,6 +315,11 @@
   font-weight: 500;
   color: #666;
   transition: background 0.15s, color 0.15s;
+}
+
+.media-type-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .media-type-btn:first-child {
