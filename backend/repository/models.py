@@ -105,6 +105,77 @@ class BatchItem:
 
 
 @dataclass
+class LLMUsageRecord:
+    record_id: str = field(default_factory=lambda: str(uuid4()))
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    provider: str = ""  # openrouter | google
+    model: str = ""  # e.g. "google/gemini-2.5-flash"
+    operation: str = ""  # label_reading | ranking
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    batch_id: str | None = None
+    item_id: str | None = None
+    cache_hit: bool = False
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> LLMUsageRecord:
+        return cls(
+            record_id=data.get("record_id", str(uuid4())),
+            timestamp=data.get("timestamp", ""),
+            provider=data.get("provider", ""),
+            model=data.get("model", ""),
+            operation=data.get("operation", ""),
+            prompt_tokens=data.get("prompt_tokens", 0),
+            completion_tokens=data.get("completion_tokens", 0),
+            total_tokens=data.get("total_tokens", 0),
+            cost_usd=data.get("cost_usd", 0.0),
+            batch_id=data.get("batch_id"),
+            item_id=data.get("item_id"),
+            cache_hit=data.get("cache_hit", False),
+        )
+
+
+@dataclass
+class CollectionItem:
+    """A single release in the user's Discogs collection (persisted locally)."""
+    instance_id: int = 0
+    release_id: int = 0
+    title: str = ""
+    artist: str = ""
+    year: int = 0
+    genres: list[str] = field(default_factory=list)
+    styles: list[str] = field(default_factory=list)
+    format: str = ""
+    cover_image: str | None = None
+    date_added: str | None = None
+    synced_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> CollectionItem:
+        return cls(
+            instance_id=data.get("instance_id", 0),
+            release_id=data.get("release_id", 0),
+            title=data.get("title", ""),
+            artist=data.get("artist", ""),
+            year=data.get("year", 0),
+            genres=data.get("genres", []),
+            styles=data.get("styles", []),
+            format=data.get("format", ""),
+            cover_image=data.get("cover_image"),
+            date_added=data.get("date_added"),
+            synced_at=data.get("synced_at", ""),
+        )
+
+
+@dataclass
 class CollectionRecord:
     record_id: str = field(default_factory=lambda: str(uuid4()))
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

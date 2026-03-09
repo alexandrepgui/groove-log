@@ -8,10 +8,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Qu
 from config import UPLOADS_DIR
 from deps import get_repo
 from logger import get_logger
-from models import MediaType, ReviewAction, ReviewStatus
+from models import ItemStatus, MediaType, ReviewAction, ReviewStatus
 from repository import Batch, BatchItem, SearchRecord
 from repository.mongo import MongoRepository
 from services.search import process_single_image
+from services.vision import invalidate_cache
 from utils import save_upload_image
 
 log = get_logger("routes.batch")
@@ -52,7 +53,7 @@ def _process_batch(
         request_start = time.time()
         try:
             repo.update_item_status(item_id, "processing")
-            response = process_single_image(image_bytes, content_type, media_type=media_type)
+            response = process_single_image(image_bytes, content_type, media_type=media_type, batch_id=batch_id, item_id=item_id)
             repo.update_item_completed(
                 item_id,
                 label_data=response.label_data.model_dump(),
@@ -64,9 +65,13 @@ def _process_batch(
             record.status = "success"
             record.total_returned = response.total
             record.top_match_title = response.results[0].title if response.results else None
+        except ValueError as e:
+            log.error("Batch item %s failed (validation): %s", item_id, e)
+            repo.update_item_error(item_id, str(e))
+            repo.increment_batch_failed(batch_id)
         except Exception as e:
             log.error("Batch item %s failed: %s", item_id, e, exc_info=True)
-            repo.update_item_error(item_id, str(e))
+            repo.update_item_error(item_id, "Search pipeline error. Check server logs for details.")
             repo.increment_batch_failed(batch_id)
             record.status = "error_pipeline"
         finally:
@@ -158,9 +163,10 @@ async def review_batch_item(
 @router.get("/api/review/items")
 async def get_all_review_items(
     review_status: ReviewStatus | None = Query(None),
+    status: ItemStatus | None = Query(None),
     repo: MongoRepository = Depends(get_repo),
 ):
-    items = repo.find_all_items(review_status=review_status)
+    items = repo.find_all_items(review_status=review_status, status=status)
     return [item.to_dict() for item in items]
 
 
@@ -183,4 +189,58 @@ async def undo_review_item(item_id: str, repo: MongoRepository = Depends(get_rep
     if not item:
         raise HTTPException(404, "Item not found.")
     repo.update_item_review(item_id, ReviewStatus.UNREVIEWED, None)
+    return {"ok": True}
+
+
+def _reprocess_item(item_id: str, image_bytes: bytes, content_type: str, batch_id: str | None = None) -> None:
+    """Background task: re-run the processing pipeline for a single item."""
+    repo = get_repo()
+    try:
+        repo.update_item_status(item_id, "processing")
+        response = process_single_image(image_bytes, content_type, media_type="vinyl", batch_id=batch_id, item_id=item_id)
+        repo.update_item_completed(
+            item_id,
+            label_data=response.label_data.model_dump(),
+            results=[r.model_dump() for r in response.results],
+            strategy=response.strategy,
+            debug=response.debug,
+        )
+    except ValueError as e:
+        log.error("Retry item %s failed (validation): %s", item_id, e)
+        repo.update_item_error(item_id, str(e))
+    except Exception as e:
+        log.error("Retry item %s failed: %s", item_id, e, exc_info=True)
+        repo.update_item_error(item_id, "Search pipeline error. Check server logs for details.")
+
+
+@router.post("/api/review/items/{item_id}/retry")
+async def retry_item(
+    item_id: str,
+    background_tasks: BackgroundTasks,
+    repo: MongoRepository = Depends(get_repo),
+):
+    item = repo.find_item(item_id)
+    if not item:
+        raise HTTPException(404, "Item not found.")
+    if not item.image_url:
+        raise HTTPException(422, "No saved image to reprocess.")
+
+    # Resolve image path from URL (e.g. /api/uploads/abc.jpg → .uploads/abc.jpg)
+    filename = item.image_url.rsplit("/", 1)[-1]
+    image_path = UPLOADS_DIR / filename
+    if not image_path.is_file():
+        raise HTTPException(422, "Image file not found on disk.")
+
+    image_bytes = image_path.read_bytes()
+    ext = image_path.suffix.lower()
+    content_type = _EXT_TO_MIME.get(ext, "image/jpeg")
+
+    # Invalidate LLM cache so the image is re-analysed from scratch
+    invalidate_cache(image_bytes)
+
+    # Reset item state
+    repo.update_item_status(item_id, "pending")
+    repo.update_item_review(item_id, ReviewStatus.UNREVIEWED, None)
+
+    background_tasks.add_task(_reprocess_item, item_id, image_bytes, content_type, item.batch_id)
     return {"ok": True}

@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { addToCollection, getPrice, reviewItemGlobal, undoReviewItem } from '../api';
 import type { DiscogsResult } from '../types';
 import { parseDiscogsTitle } from '../utils';
+import ZoomableImage from './ZoomableImage';
 
 interface Props {
   result: DiscogsResult;
@@ -14,7 +15,7 @@ interface Props {
 
 export default function ResultCard({ result, itemId, renderActions, className }: Props) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'added' | 'error' | 'dismissed'>('idle');
-  const [price, setPrice] = useState<{ lowest_price: number | null; num_for_sale: number } | null>(null);
+  const [price, setPrice] = useState<{ lowest_price: number | null; num_for_sale: number; currency: string | null } | null>(null);
 
   const { artist, album: albumTitle } = parseDiscogsTitle(result.title);
 
@@ -66,7 +67,7 @@ export default function ResultCard({ result, itemId, renderActions, className }:
   return (
     <div className={`result-card ${acted ? 'result-card-acted' : ''} ${className ?? ''}`}>
       {result.cover_image && (
-        <img
+        <ZoomableImage
           className="result-cover"
           src={result.cover_image}
           alt={result.title ?? 'Cover'}
@@ -85,7 +86,7 @@ export default function ResultCard({ result, itemId, renderActions, className }:
           {result.label && <span>{result.label}</span>}
           {result.catno && <span>Cat# {result.catno}</span>}
           {price?.lowest_price != null && (
-            <span className="result-price">From ${price.lowest_price.toFixed(2)} ({price.num_for_sale} for sale)</span>
+            <span className="result-price">From {price.lowest_price.toFixed(2)} {price.currency ?? ''} ({price.num_for_sale} for sale)</span>
           )}
         </div>
 

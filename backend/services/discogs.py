@@ -1,4 +1,7 @@
 import os
+import re
+import time
+from collections.abc import Generator
 from difflib import SequenceMatcher
 
 import requests
@@ -8,6 +11,10 @@ from logger import get_logger
 from services.discogs_auth import build_oauth_headers, get_current_tokens
 
 log = get_logger("services.discogs")
+
+# Pause when remaining requests drop to this threshold
+_RATE_LIMIT_THRESHOLD = 5
+_RATE_LIMIT_PAUSE = 5  # seconds
 
 
 def _headers() -> dict:
@@ -20,6 +27,23 @@ def _headers() -> dict:
         "User-Agent": DISCOGS_USER_AGENT,
         "Authorization": f"Discogs token={token}",
     }
+
+
+def _respect_rate_limit(resp: requests.Response) -> None:
+    """Sleep if we're close to the Discogs rate limit, or back off on 429."""
+    if resp.status_code == 429:
+        log.warning("Discogs rate limit hit (429), pausing %ds", _RATE_LIMIT_PAUSE * 2)
+        time.sleep(_RATE_LIMIT_PAUSE * 2)
+        return
+    remaining = resp.headers.get("X-Discogs-Ratelimit-Remaining")
+    if remaining is not None:
+        try:
+            remaining_int = int(remaining)
+        except (ValueError, TypeError):
+            return
+        if remaining_int <= _RATE_LIMIT_THRESHOLD:
+            log.info("Discogs rate limit low (%d remaining), pausing %ds", remaining_int, _RATE_LIMIT_PAUSE)
+            time.sleep(_RATE_LIMIT_PAUSE)
 
 
 def discogs_search(max_pages: int = 10, **params) -> list[dict]:
@@ -37,6 +61,7 @@ def discogs_search(max_pages: int = 10, **params) -> list[dict]:
             params=params,
         )
         log.debug("Discogs API: page=%d status=%d", page, resp.status_code)
+        _respect_rate_limit(resp)
         resp.raise_for_status()
         data = resp.json()
         results = data.get("results", [])
@@ -69,7 +94,28 @@ def prefilter(releases: list[dict], candidate_artists: list[str]) -> list[dict]:
 
 _MEDIA_TYPE_TO_FORMAT = {"vinyl": "Vinyl", "cd": "CD"}
 
-_SANITY_THRESHOLD = 0.4
+
+def _normalize_catno(raw: str) -> list[str]:
+    """Generate search variants for a catalog number.
+
+    1. Original raw value (always first)
+    2. Strip trailing side indicator via regex r'[\\s-][AB]$' (case-insensitive)
+    3. If the stripped form contains dots, add a variant with dots removed
+    """
+    variants = [raw]
+    stripped = re.sub(r'[\s-][AB]$', '', raw, flags=re.IGNORECASE)
+    if stripped != raw:
+        variants.append(stripped)
+        no_dots = stripped.replace('.', '')
+        if no_dots != stripped:
+            variants.append(no_dots)
+    else:
+        no_dots = raw.replace('.', '')
+        if no_dots != raw:
+            variants.append(no_dots)
+    return variants
+
+_SANITY_THRESHOLD = 0.5
 
 
 def _best_similarity(candidates: list[str], text: str) -> float:
@@ -87,7 +133,7 @@ def _sanity_check(
     candidate_artists: list[str],
     threshold: float = _SANITY_THRESHOLD,
 ) -> list[dict]:
-    """Keep only results where artist AND album have similarity >= threshold."""
+    """Keep only results where artist OR album have similarity >= threshold."""
     passed = []
     for r in results:
         title = r.get("title", "")
@@ -99,7 +145,7 @@ def _sanity_check(
         artist_sim = _best_similarity(candidate_artists, r_artist)
         album_sim = _best_similarity(candidate_albums, r_album)
 
-        if artist_sim >= threshold and album_sim >= threshold:
+        if artist_sim >= threshold or album_sim >= threshold:
             passed.append(r)
         else:
             log.debug(
@@ -109,14 +155,21 @@ def _sanity_check(
     return passed
 
 
-def search_with_strategy(
+def generate_search_candidates(
     candidate_albums: list[str],
     candidate_artists: list[str],
     label_meta: dict,
     media_type: str = "vinyl",
-) -> tuple[list[dict], str, list[str]]:
-    """Try progressively looser search strategies. Returns (releases, strategy_used, strategies_tried)."""
-    tried: list[str] = []
+    tried: list[str] | None = None,
+    candidate_tracks: list[str] | None = None,
+) -> Generator[tuple[list[dict], str], None, None]:
+    """Yield (sane_results, strategy_name) for each strategy that produces results.
+
+    Strategies are tried in priority order. The caller decides when to stop.
+    The ``tried`` list (if provided) is appended with strategy names for debug/telemetry.
+    """
+    if tried is None:
+        tried = []
     fmt = {"format": _MEDIA_TYPE_TO_FORMAT[media_type]}
 
     def _try(results: list[dict], strategy: str) -> list[dict] | None:
@@ -131,39 +184,45 @@ def search_with_strategy(
 
     # 1. Catalog number + label (most precise)
     if label_meta.get("catno"):
-        params = {"catno": label_meta["catno"], **fmt}
-        if label_meta.get("label"):
-            params["label"] = label_meta["label"]
-        strategy = f"catno='{label_meta['catno']}'" + (
-            f" + label='{label_meta['label']}'" if "label" in params else ""
-        )
-        log.info("Strategy 1: catno search — %s", params)
-        results = discogs_search(**params)
-        if results:
-            sane = _try(results, strategy)
-            if sane:
-                return sane, strategy, tried
-
-        if label_meta.get("label"):
-            strategy_1b = f"catno='{label_meta['catno']}'"
-            log.info("Strategy 1b: catno only (dropping label)")
-            results = discogs_search(catno=label_meta["catno"], **fmt)
+        catno_variants = _normalize_catno(label_meta["catno"])
+        for catno_variant in catno_variants:
+            params = {"catno": catno_variant, **fmt}
+            if label_meta.get("label"):
+                params["label"] = label_meta["label"]
+            strategy = f"catno='{catno_variant}'" + (
+                f" + label='{label_meta['label']}'" if "label" in params else ""
+            )
+            log.info("Strategy 1: catno search — %s", params)
+            results = discogs_search(**params)
             if results:
-                sane = _try(results, strategy_1b)
+                sane = _try(results, strategy)
                 if sane:
-                    return sane, strategy_1b, tried
+                    yield sane, strategy
+
+            if label_meta.get("label"):
+                strategy_1b = f"catno='{catno_variant}'"
+                log.info("Strategy 1b: catno only (dropping label)")
+                results = discogs_search(catno=catno_variant, **fmt)
+                if results:
+                    sane = _try(results, strategy_1b)
+                    if sane:
+                        yield sane, strategy_1b
 
     # 2. Freeform query (q) with album + artist
     for album in candidate_albums:
         for artist in candidate_artists:
-            query = f"{artist} {album}"
-            strategy = f"q='{query}'"
+            if artist.strip().lower() == album.strip().lower():
+                query = artist
+                strategy = f"q='{query}' (self-titled)"
+            else:
+                query = f"{artist} {album}"
+                strategy = f"q='{query}'"
             log.info("Strategy 2: freeform q='%s'", query)
             results = discogs_search(q=query, **fmt)
             if results:
                 sane = _try(results, strategy)
                 if sane:
-                    return sane, strategy, tried
+                    yield sane, strategy
 
     # 3. Strict release_title + artist
     for album in candidate_albums:
@@ -174,7 +233,7 @@ def search_with_strategy(
             if results:
                 sane = _try(results, strategy)
                 if sane:
-                    return sane, strategy, tried
+                    yield sane, strategy
 
     # 4. Artist-only search, fuzzy match titles
     for artist in candidate_artists:
@@ -193,15 +252,30 @@ def search_with_strategy(
             strategy = f"artist='{artist}' + fuzzy title match"
             tried.append(strategy)
             log.info("Strategy 4 hit: %d fuzzy-matched from %d", len(matched), len(artist_results))
-            return matched, strategy, tried
+            yield matched, strategy
+            return
         strategy = f"artist='{artist}' (all releases, no title match)"
         tried.append(strategy)
         log.info("Strategy 4 fallback: %d results (no title match)", len(artist_results))
-        return artist_results, strategy, tried
+        yield artist_results, strategy
+        return
+
+    # 5. Track name search (last resort — no sanity check, relies on LLM ranking)
+    if candidate_tracks:
+        # Pick up to 3 distinctive track names to form a query
+        query_tracks = candidate_tracks[:3]
+        query = " ".join(query_tracks)
+        strategy = f"q='{query}' (track names)"
+        log.info("Strategy 5: track name search q='%s'", query)
+        results = discogs_search(q=query, **fmt)
+        if results:
+            tried.append(strategy)
+            log.info("Strategy 5: %d results for track query", len(results))
+            yield results, strategy
+        else:
+            tried.append(f"{strategy} (no results)")
 
     log.warning("All search strategies exhausted, no results found")
-    tried.append("exhausted all strategies")
-    return [], "exhausted all strategies", tried
 
 
 def score_by_metadata(releases: list[dict], label_meta: dict) -> list[dict]:
@@ -255,6 +329,7 @@ def get_marketplace_stats(release_id: int) -> dict:
         f"{DISCOGS_BASE_URL}/marketplace/stats/{release_id}",
         headers=_headers(),
     )
+    _respect_rate_limit(resp)
     resp.raise_for_status()
     return resp.json()
 
@@ -265,8 +340,34 @@ def get_identity() -> str:
         f"{DISCOGS_BASE_URL}/oauth/identity",
         headers=_headers(),
     )
+    _respect_rate_limit(resp)
     resp.raise_for_status()
     return resp.json()["username"]
+
+
+def get_collection(
+    page: int = 1,
+    per_page: int = 50,
+    sort: str = "artist",
+    sort_order: str = "asc",
+) -> dict:
+    """Fetch the authenticated user's Discogs collection (folder 0 = all)."""
+    tokens = get_current_tokens()
+    username = tokens.username if tokens and tokens.username else get_identity()
+    log.info("Fetching collection page %d for user '%s'", page, username)
+    resp = requests.get(
+        f"{DISCOGS_BASE_URL}/users/{username}/collection/folders/0/releases",
+        headers=_headers(),
+        params={
+            "page": page,
+            "per_page": per_page,
+            "sort": sort,
+            "sort_order": sort_order,
+        },
+    )
+    _respect_rate_limit(resp)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def add_to_collection(release_id: int) -> dict:
@@ -278,5 +379,6 @@ def add_to_collection(release_id: int) -> dict:
         f"{DISCOGS_BASE_URL}/users/{username}/collection/folders/1/releases/{release_id}",
         headers=_headers(),
     )
+    _respect_rate_limit(resp)
     resp.raise_for_status()
     return resp.json()

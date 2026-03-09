@@ -69,7 +69,7 @@ async def search(
         record.status = "error_pipeline"
         log.error("Search pipeline failed: %s", e, exc_info=True)
         _save_record(repo, record, request_start)
-        raise HTTPException(status_code=502, detail=f"Search pipeline error: {e}")
+        raise HTTPException(status_code=502, detail="Search pipeline error. Please try again.")
 
     record.status = "success"
     record.total_returned = response.total
@@ -120,7 +120,7 @@ async def add_to_collection_endpoint(
         log.error("Discogs collection API failed: %s", e)
         if status == 404:
             raise HTTPException(status_code=404, detail="Release not found on Discogs.")
-        raise HTTPException(status_code=502, detail=f"Discogs API error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to add to Discogs collection. Please try again.")
     except Exception as e:
         record.status = "error"
         record.error = str(e)
@@ -130,7 +130,7 @@ async def add_to_collection_endpoint(
         except Exception as save_err:
             log.error("Failed to save collection record: %s", save_err, exc_info=True)
         log.error("Unexpected error adding to collection: %s", e, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Discogs API error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to add to Discogs collection. Please try again.")
 
     record.status = "success"
     record.discogs_instance_id = instance.get("instance_id")
@@ -156,12 +156,21 @@ async def get_price(release_id: int):
         status = e.response.status_code if e.response is not None else 502
         if status == 404:
             raise HTTPException(status_code=404, detail="Release not found")
-        raise HTTPException(status_code=502, detail=f"Discogs API error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch price data. Please try again.")
     except Exception as e:
         log.error("Failed to fetch marketplace stats for %d: %s", release_id, e)
-        raise HTTPException(status_code=502, detail=f"Discogs API error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch price data. Please try again.")
+
+    lowest = stats.get("lowest_price")
+    if isinstance(lowest, dict):
+        price_value = lowest.get("value")
+        currency = lowest.get("currency")
+    else:
+        price_value = lowest
+        currency = None
 
     return {
-        "lowest_price": stats.get("lowest_price", {}).get("value") if isinstance(stats.get("lowest_price"), dict) else stats.get("lowest_price"),
+        "lowest_price": price_value,
         "num_for_sale": stats.get("num_for_sale", 0),
+        "currency": currency,
     }

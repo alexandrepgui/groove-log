@@ -9,6 +9,7 @@ export interface AuthStatus {
 export interface LabelData {
   albums: string[];
   artists: string[];
+  tracks: string[] | null;
   country: string | null;
   format: string | null;
   label: string | null;
@@ -46,6 +47,36 @@ export interface SearchResponse {
   debug: DebugInfo | null;
 }
 
+export interface CollectionItem {
+  release_id: number;
+  instance_id: number;
+  title: string;
+  artist: string;
+  year: number;
+  genres: string[];
+  styles: string[];
+  format: string;
+  cover_image: string | null;
+  date_added: string | null;
+}
+
+export interface CollectionResponse {
+  items: CollectionItem[];
+  page: number;
+  pages: number;
+  per_page: number;
+  total_items: number;
+}
+
+export interface SyncStatus {
+  status: 'idle' | 'syncing' | 'error';
+  started_at?: string | null;
+  completed_at?: string | null;
+  total_items?: number;
+  items_synced?: number;
+  error?: string | null;
+}
+
 export interface Batch {
   batch_id: string;
   status: 'processing' | 'completed' | 'failed';
@@ -65,7 +96,7 @@ export interface BatchItem {
   label_data: LabelData | null;
   results: DiscogsResult[] | null;
   strategy: string | null;
-  review_status: 'unreviewed' | 'accepted' | 'skipped';
+  review_status: 'unreviewed' | 'accepted' | 'skipped' | 'wrong';
   accepted_release_id: number | null;
   image_url: string | null;
   debug: DebugInfo | null;

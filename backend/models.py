@@ -27,11 +27,13 @@ class ReviewStatus(StrEnum):
     UNREVIEWED = "unreviewed"
     ACCEPTED = "accepted"
     SKIPPED = "skipped"
+    WRONG = "wrong"
 
 
 class LabelData(BaseModel):
     albums: list[str]
     artists: list[str]
+    tracks: list[str] | None = None
     country: str | None = None
     format: str | None = None
     label: str | None = None

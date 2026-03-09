@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { addToCollection, reviewItemGlobal, undoReviewItem } from '../api';
 import type { BatchItem, DebugInfo } from '../types';
 import ResultCard from './ResultCard';
+import ZoomableImage from './ZoomableImage';
 
 interface Props {
   items: BatchItem[];
@@ -62,7 +63,7 @@ export default function BatchReview({ items, onDone }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   // Track items acted on in this session: item_id -> action
-  const [acted, setActed] = useState<Map<string, 'accepted' | 'skipped'>>(new Map());
+  const [acted, setActed] = useState<Map<string, 'accepted' | 'skipped' | 'wrong'>>(new Map());
 
   const completedItems = items.filter((i) => i.status === 'completed' && i.review_status === 'unreviewed');
   const reviewable = completedItems.filter((i) => !acted.has(i.item_id));
@@ -70,12 +71,13 @@ export default function BatchReview({ items, onDone }: Props) {
   if (reviewable.length === 0 && acted.size === 0) {
     const accepted = items.filter((i) => i.review_status === 'accepted').length;
     const skipped = items.filter((i) => i.review_status === 'skipped').length;
+    const wrong = items.filter((i) => i.review_status === 'wrong').length;
     const errored = items.filter((i) => i.status === 'error').length;
 
     return (
       <div className="batch-summary">
         <h3>Review complete</h3>
-        <p>{accepted} accepted, {skipped} dismissed, {errored} errored</p>
+        <p>{accepted} accepted, {skipped} dismissed, {wrong} wrong, {errored} errored</p>
         <button className="btn btn-show-more" onClick={onDone}>Done</button>
       </div>
     );
@@ -87,7 +89,7 @@ export default function BatchReview({ items, onDone }: Props) {
   const topResult = item?.results?.[0] ?? null;
 
   const handleAction = async (
-    action: 'accepted' | 'skipped',
+    action: 'accepted' | 'skipped' | 'wrong',
     releaseId?: number,
   ) => {
     setActionLoading(true);
@@ -225,7 +227,7 @@ export default function BatchReview({ items, onDone }: Props) {
           {itemAction ? (
             <>
               <span className="batch-review-acted">
-                {itemAction === 'accepted' ? 'Added' : 'Dismissed'}
+                {itemAction === 'accepted' ? 'Added' : itemAction === 'wrong' ? 'Wrong' : 'Dismissed'}
               </span>
               <button
                 className="btn btn-undo"
@@ -237,6 +239,13 @@ export default function BatchReview({ items, onDone }: Props) {
             </>
           ) : (
             <>
+              <button
+                className="btn btn-wrong"
+                disabled={actionLoading}
+                onClick={() => handleAction('wrong')}
+              >
+                Wrong
+              </button>
               <button
                 className="btn btn-dismiss"
                 disabled={actionLoading}
@@ -308,7 +317,7 @@ export default function BatchReview({ items, onDone }: Props) {
 
       {item.image_url && (
         <div className="batch-review-photo-wrapper">
-          <img
+          <ZoomableImage
             src={item.image_url}
             alt={item.image_filename}
             className="batch-review-photo"

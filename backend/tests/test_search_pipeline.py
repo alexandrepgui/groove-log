@@ -1,11 +1,11 @@
-"""Tests for services/search.py: self-titled logic, tiebreaker, safety net, _build_debug."""
+"""Tests for services/search.py: self-titled logic, tiebreaker, strategy fallthrough, _build_debug."""
 
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
-from conftest import FAKE_RANKING, make_discogs_response, make_llm_response
-from services.search import _build_debug, process_single_image
+from conftest import FAKE_RANKING, make_discogs_response, make_mock_llm_client
+from services.search import _SPACER_GIF, _build_debug, process_single_image
 
 # Default release used by tests that don't need custom releases.
 _DEFAULT_RELEASE = {
@@ -28,31 +28,29 @@ def _run_pipeline(label_data, discogs_results=None, ranking=None):
     if ranking is None:
         ranking = FAKE_RANKING
 
-    llm_responses = [make_llm_response(label_data), make_llm_response(ranking)]
-    llm_idx = 0
-
-    def mock_llm(*a, **kw):
-        nonlocal llm_idx
-        r = llm_responses[llm_idx]
-        llm_idx += 1
-        return r
-
+    mock_client = make_mock_llm_client([label_data, ranking])
     discogs_resp = make_discogs_response(discogs_results)
+    mock_repo = MagicMock()
 
     with (
-        patch("services.vision.requests.post", side_effect=mock_llm),
+        patch("services.vision._get_client", return_value=mock_client),
         patch("services.discogs.requests.get", return_value=discogs_resp),
         patch("services.vision._read_cache", return_value=None),
         patch("services.vision._write_cache"),
+        patch("services.search.get_repo", return_value=mock_repo),
     ):
         return process_single_image(b"fake-image", "image/jpeg")
 
 
-def _make_label(albums=None, artists=None):
+_UNSET = object()
+
+
+def _make_label(albums=_UNSET, artists=_UNSET, tracks=None):
     """Build a minimal label_data dict."""
     return {
-        "albums": albums if albums is not None else ["Kind of Blue"],
-        "artists": artists if artists is not None else ["Miles Davis"],
+        "albums": ["Kind of Blue"] if albums is _UNSET else albums,
+        "artists": ["Miles Davis"] if artists is _UNSET else artists,
+        "tracks": tracks,
         "country": None, "format": None, "label": None, "catno": None, "year": None,
     }
 
@@ -89,24 +87,20 @@ class TestBuildDebug:
 
 class TestSelfTitledLogic:
     def test_album_missing_uses_artist_as_album(self):
-        resp = _run_pipeline(_make_label(albums=["Not present in label"], artists=["Miles Davis"]))
+        resp = _run_pipeline(_make_label(albums=None, artists=["Miles Davis"]))
         assert resp.label_data.albums == ["Miles Davis"]
 
     def test_artist_missing_uses_album_as_artist(self):
-        resp = _run_pipeline(_make_label(albums=["Kind of Blue"], artists=["Not present in label"]))
+        resp = _run_pipeline(_make_label(albums=["Kind of Blue"], artists=None))
         assert resp.label_data.artists == ["Kind of Blue"]
 
     def test_both_missing_raises(self):
         with pytest.raises(ValueError, match="Could not extract"):
-            _run_pipeline(_make_label(albums=["Not present in label"], artists=["Not present in label"]))
+            _run_pipeline(_make_label(albums=None, artists=None))
 
     def test_empty_albums_and_artists_raises(self):
         with pytest.raises(ValueError, match="Could not extract"):
             _run_pipeline(_make_label(albums=[], artists=[]))
-
-    def test_sentinel_case_insensitive(self):
-        resp = _run_pipeline(_make_label(albums=["not present in label"], artists=["Miles Davis"]))
-        assert resp.label_data.albums == ["Miles Davis"]
 
 
 # ── Cover image tiebreaker ────────────────────────────────────────────────────
@@ -150,20 +144,113 @@ class TestCoverImageTiebreaker:
         resp = _run_pipeline(_make_label(), releases, {"likeliness": [0, 1], "discarded": []})
         assert resp.results[0].discogs_id == 1
 
+    def test_spacer_gif_treated_as_no_image(self):
+        """Discogs spacer.gif placeholder should be treated as no cover image."""
+        spacer = f"https://st.discogs.com/abc123/images/{_SPACER_GIF}"
+        releases = [
+            {"id": 1, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C1", "uri": "/release/1", "cover_image": spacer},
+            {"id": 2, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C2", "uri": "/release/2", "cover_image": "https://i.discogs.com/real-cover.jpg"},
+        ]
+        resp = _run_pipeline(_make_label(), releases, {"likeliness": [0, 1], "discarded": []})
+        assert resp.results[0].discogs_id == 2
+        assert resp.results[0].cover_image == "https://i.discogs.com/real-cover.jpg"
+        assert resp.results[1].discogs_id == 1
+        assert resp.results[1].cover_image is None
 
-# ── Safety net ────────────────────────────────────────────────────────────────
+    def test_promotes_image_across_multiple_same_title(self):
+        """Image results bubble up even when more than two share the same title."""
+        releases = [
+            {"id": 1, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C1", "uri": "/release/1", "cover_image": None},
+            {"id": 2, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C2", "uri": "/release/2", "cover_image": None},
+            {"id": 3, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C3", "uri": "/release/3", "cover_image": "https://example.com/cover.jpg"},
+        ]
+        resp = _run_pipeline(_make_label(), releases, {"likeliness": [0, 1, 2], "discarded": []})
+        assert resp.results[0].discogs_id == 3
+        assert resp.results[0].cover_image == "https://example.com/cover.jpg"
 
 
-class TestSafetyNet:
-    def test_all_discarded_keeps_results(self):
+# ── Strategy fallthrough ──────────────────────────────────────────────────────
+
+
+class TestStrategyFallthrough:
+    def test_falls_through_when_llm_rejects_all(self):
+        """When LLM discards all results from strategy 1, pipeline tries strategy 2."""
+        strategy1_releases = [
+            {"id": 1, "title": "Miles Davis - Wrong Album", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C1", "uri": "/release/1", "cover_image": None},
+        ]
+        strategy2_releases = [
+            {"id": 2, "title": "Miles Davis - Kind of Blue", "year": "1959",
+             "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
+             "catno": "C2", "uri": "/release/2", "cover_image": "https://example.com/cover.jpg"},
+        ]
+
+        label_data = _make_label()
+        # Vision response, then ranking for strategy 1 (discard all), then ranking for strategy 2 (accept)
+        mock_client = make_mock_llm_client([
+            label_data,
+            {"likeliness": [0], "discarded": [0]},
+            {"likeliness": [0], "discarded": []},
+        ])
+        mock_repo = MagicMock()
+
+        def fake_generator(*args, **kwargs):
+            yield strategy1_releases, "strategy_1"
+            yield strategy2_releases, "strategy_2"
+
+        with (
+            patch("services.vision._get_client", return_value=mock_client),
+            patch("services.vision._read_cache", return_value=None),
+            patch("services.vision._write_cache"),
+            patch("services.search.get_repo", return_value=mock_repo),
+            patch("services.search.generate_search_candidates", side_effect=fake_generator),
+        ):
+            resp = process_single_image(b"fake-image", "image/jpeg")
+
+        assert resp.total == 1
+        assert resp.results[0].discogs_id == 2
+        assert resp.strategy == "strategy_2"
+
+    def test_empty_results_when_all_strategies_exhausted(self):
+        """When LLM discards everything from the only strategy, return empty results."""
         releases = [
             {"id": 1, "title": "Miles Davis - Kind of Blue", "year": "1959",
              "country": "US", "format": ["Vinyl"], "label": ["Columbia"],
              "catno": "C1", "uri": "/release/1", "cover_image": "https://example.com/cover.jpg"},
         ]
-        resp = _run_pipeline(_make_label(), releases, {"likeliness": [0], "discarded": [0]})
-        assert resp.total == 1
-        assert resp.results[0].discogs_id == 1
+
+        label_data = _make_label()
+        mock_client = make_mock_llm_client([
+            label_data,
+            {"likeliness": [0], "discarded": [0]},
+        ])
+        mock_repo = MagicMock()
+
+        def fake_generator(*args, **kwargs):
+            yield releases, "only_strategy"
+
+        with (
+            patch("services.vision._get_client", return_value=mock_client),
+            patch("services.vision._read_cache", return_value=None),
+            patch("services.vision._write_cache"),
+            patch("services.search.get_repo", return_value=mock_repo),
+            patch("services.search.generate_search_candidates", side_effect=fake_generator),
+        ):
+            resp = process_single_image(b"fake-image", "image/jpeg")
+
+        assert resp.total == 0
+        assert resp.results == []
 
 
 # ── No results from Discogs ──────────────────────────────────────────────────
@@ -172,14 +259,16 @@ class TestSafetyNet:
 class TestNoResults:
     def test_empty_discogs_returns_empty(self):
         label = _make_label()
-        llm_resp = make_llm_response(label)
+        mock_client = make_mock_llm_client([label])
         discogs_resp = make_discogs_response([])
+        mock_repo = MagicMock()
 
         with (
-            patch("services.vision.requests.post", return_value=llm_resp),
+            patch("services.vision._get_client", return_value=mock_client),
             patch("services.discogs.requests.get", return_value=discogs_resp),
             patch("services.vision._read_cache", return_value=None),
             patch("services.vision._write_cache"),
+            patch("services.search.get_repo", return_value=mock_repo),
         ):
             resp = process_single_image(b"fake-image", "image/jpeg")
 

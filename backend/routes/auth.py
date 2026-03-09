@@ -9,10 +9,12 @@ Provides endpoints for:
 
 import os
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
+from deps import get_repo
 from logger import get_logger
+from repository.mongo import MongoRepository
 from services.discogs_auth import (
     clear_tokens,
     exchange_verifier,
@@ -55,7 +57,7 @@ async def login(request: Request):
         _request_token, authorize_url = get_request_token(callback_url)
     except Exception as e:
         log.error("Failed to get request token: %s", e, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Failed to start OAuth flow: {e}")
+        raise HTTPException(status_code=502, detail="Failed to start OAuth flow. Please try again.")
 
     return {"authorize_url": authorize_url}
 
@@ -64,6 +66,7 @@ async def login(request: Request):
 async def oauth_callback(
     oauth_token: str = Query(...),
     oauth_verifier: str = Query(...),
+    repo: MongoRepository = Depends(get_repo),
 ):
     """Handle the callback from Discogs after user authorization.
 
@@ -74,10 +77,10 @@ async def oauth_callback(
         tokens = exchange_verifier(oauth_token, oauth_verifier)
     except ValueError as e:
         log.error("OAuth exchange failed (bad state): %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth token.")
     except Exception as e:
         log.error("OAuth exchange failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Failed to complete OAuth: {e}")
+        raise HTTPException(status_code=502, detail="Failed to complete OAuth. Please try again.")
 
     # Fetch the username now that we have valid tokens
     # Deferred import to avoid circular dependency: discogs → discogs_auth → discogs
@@ -88,6 +91,7 @@ async def oauth_callback(
     except Exception as e:
         log.warning("Got OAuth tokens but failed to fetch identity: %s", e)
 
+    repo.save_oauth_tokens(tokens.access_token, tokens.access_token_secret, tokens.username)
     log.info("OAuth completed for user: %s", tokens.username)
 
     # Redirect back to the frontend app
@@ -96,7 +100,8 @@ async def oauth_callback(
 
 
 @router.post("/logout")
-async def logout():
+async def logout(repo: MongoRepository = Depends(get_repo)):
     """Clear stored OAuth tokens."""
     clear_tokens()
+    repo.delete_oauth_tokens()
     return {"ok": True}

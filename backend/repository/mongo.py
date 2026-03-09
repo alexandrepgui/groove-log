@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from pymongo import MongoClient
+from pymongo import ASCENDING, DESCENDING, MongoClient, ReplaceOne
 from pymongo.collection import Collection
 
 from logger import get_logger
-from .models import Batch, BatchItem, CollectionRecord, SearchRecord
+from .models import Batch, BatchItem, CollectionItem, CollectionRecord, LLMUsageRecord, SearchRecord
 
 log = get_logger("repository.mongo")
 
@@ -21,7 +21,112 @@ class MongoRepository:
         self._collection_records: Collection = self._db["collection_records"]
         self._batches: Collection = self._db["batches"]
         self._items: Collection = self._db["batch_items"]
+        self._llm_usage: Collection = self._db["llm_usage"]
+        self._collection_items: Collection = self._db["collection_items"]
+        self._sync_status: Collection = self._db["sync_status"]
+        self._ensure_indexes()
         log.info("MongoDB repository: db=%s", database)
+
+    def _ensure_indexes(self) -> None:
+        self._collection_items.create_index("instance_id", unique=True)
+        self._collection_items.create_index([
+            ("title", "text"),
+            ("artist", "text"),
+        ], name="collection_text_search")
+
+    # ── OAuth tokens ─────────────────────────────────────────────────────
+
+    def save_oauth_tokens(self, access_token: str, access_token_secret: str, username: str | None) -> None:
+        self._db["oauth_tokens"].replace_one(
+            {"_id": "discogs"},
+            {"_id": "discogs", "access_token": access_token, "access_token_secret": access_token_secret, "username": username},
+            upsert=True,
+        )
+        log.info("OAuth tokens persisted for user=%s", username)
+
+    def load_oauth_tokens(self) -> dict | None:
+        doc = self._db["oauth_tokens"].find_one({"_id": "discogs"})
+        if doc:
+            return {"access_token": doc["access_token"], "access_token_secret": doc["access_token_secret"], "username": doc.get("username")}
+        return None
+
+    def delete_oauth_tokens(self) -> None:
+        self._db["oauth_tokens"].delete_one({"_id": "discogs"})
+        log.info("OAuth tokens deleted")
+
+    # ── Collection items (persisted Discogs collection) ────────────────────
+
+    def upsert_collection_items_bulk(self, items: list[CollectionItem]) -> int:
+        if not items:
+            return 0
+        ops = [
+            ReplaceOne({"instance_id": item.instance_id}, item.to_dict(), upsert=True)
+            for item in items
+        ]
+        result = self._collection_items.bulk_write(ops)
+        return result.upserted_count + result.modified_count
+
+    _SORT_FIELD_MAP = {
+        "artist": "artist",
+        "title": "title",
+        "year": "year",
+        "added": "date_added",
+        "format": "format",
+    }
+
+    def find_collection_items(
+        self,
+        query: str | None = None,
+        sort: str = "artist",
+        sort_order: str = "asc",
+        skip: int = 0,
+        limit: int = 50,
+    ) -> list[CollectionItem]:
+        filt: dict = {}
+        if query:
+            filt["$text"] = {"$search": query}
+
+        mongo_field = self._SORT_FIELD_MAP.get(sort, "artist")
+        direction = ASCENDING if sort_order == "asc" else DESCENDING
+
+        sort_spec: list[tuple[str, int]] = [(mongo_field, direction)]
+        # Secondary sort by year when primary is artist
+        if sort == "artist":
+            sort_spec.append(("year", direction))
+
+        cursor = (
+            self._collection_items.find(filt, {"_id": 0})
+            .sort(sort_spec)
+            .skip(skip)
+            .limit(limit)
+        )
+        return [CollectionItem.from_dict(doc) for doc in cursor]
+
+    def count_collection_items(self, query: str | None = None) -> int:
+        filt: dict = {}
+        if query:
+            filt["$text"] = {"$search": query}
+        return self._collection_items.count_documents(filt)
+
+    def delete_stale_items(self, synced_before: str) -> int:
+        """Delete collection items that were not updated during the latest sync."""
+        result = self._collection_items.delete_many(
+            {"synced_at": {"$lt": synced_before}}
+        )
+        return result.deleted_count
+
+    # ── Sync status ────────────────────────────────────────────────────────
+
+    def get_sync_status(self) -> dict:
+        doc = self._sync_status.find_one({"_id": "collection"}, {"_id": 0})
+        return doc or {"status": "idle"}
+
+    def update_sync_status(self, update: dict) -> None:
+        self._sync_status.update_one(
+            {"_id": "collection"},
+            {"$set": update},
+            upsert=True,
+        )
 
     # ── Search telemetry ──────────────────────────────────────────────────
 
@@ -104,11 +209,15 @@ class MongoRepository:
         cursor = self._items.find(query, {"_id": 0}).sort("created_at", 1)
         return [BatchItem.from_dict(doc) for doc in cursor]
 
-    def find_all_items(self, review_status: str | None = None) -> list[BatchItem]:
-        """Query across all batches, optionally filtered by review_status."""
+    def find_all_items(
+        self, review_status: str | None = None, status: str | None = None,
+    ) -> list[BatchItem]:
+        """Query across all batches, optionally filtered by review_status and/or status."""
         query: dict = {}
         if review_status is not None:
             query["review_status"] = review_status
+        if status is not None:
+            query["status"] = status
         cursor = self._items.find(query, {"_id": 0}).sort("created_at", 1)
         return [BatchItem.from_dict(doc) for doc in cursor]
 
@@ -132,7 +241,10 @@ class MongoRepository:
         }
         if debug is not None:
             update["debug"] = debug
-        self._items.update_one({"item_id": item_id}, {"$set": update})
+        self._items.update_one(
+            {"item_id": item_id},
+            {"$set": update, "$unset": {"error": ""}},
+        )
 
     def update_item_error(self, item_id: str, error: str) -> None:
         self._items.update_one(
@@ -154,3 +266,65 @@ class MongoRepository:
                 "accepted_release_id": accepted_release_id,
             }},
         )
+
+    # ── LLM usage tracking ────────────────────────────────────────────────
+
+    def save_llm_usage(self, record: LLMUsageRecord) -> None:
+        doc = record.to_dict()
+        self._llm_usage.replace_one(
+            {"record_id": record.record_id}, doc, upsert=True,
+        )
+        log.debug("Saved LLM usage %s (op=%s cost=$%.6f)", record.record_id, record.operation, record.cost_usd)
+
+    def get_usage_summary(self, days: int = 30) -> dict:
+        """Aggregate LLM usage stats over the last N days."""
+        cutoff = datetime.now(timezone.utc)
+        cutoff = cutoff.replace(hour=0, minute=0, second=0, microsecond=0)
+        from datetime import timedelta
+        cutoff_str = (cutoff - timedelta(days=days)).isoformat()
+
+        match_stage = {"$match": {"timestamp": {"$gte": cutoff_str}, "cache_hit": False}}
+
+        pipeline = [
+            match_stage,
+            {"$facet": {
+                "totals": [{"$group": {
+                    "_id": None,
+                    "total_calls": {"$sum": 1},
+                    "total_tokens": {"$sum": "$total_tokens"},
+                    "total_cost_usd": {"$sum": "$cost_usd"},
+                }}],
+                "by_day": [{"$group": {
+                    "_id": {"$substr": ["$timestamp", 0, 10]},
+                    "requests": {"$sum": 1},
+                    "cost_usd": {"$sum": "$cost_usd"},
+                }}, {"$sort": {"_id": 1}}],
+                "by_model": [{"$group": {
+                    "_id": "$model",
+                    "requests": {"$sum": 1},
+                    "cost_usd": {"$sum": "$cost_usd"},
+                }}],
+                "by_operation": [{"$group": {
+                    "_id": "$operation",
+                    "requests": {"$sum": 1},
+                    "tokens": {"$sum": "$total_tokens"},
+                    "cost_usd": {"$sum": "$cost_usd"},
+                }}],
+            }},
+        ]
+
+        result = list(self._llm_usage.aggregate(pipeline))
+        if not result:
+            return {"period_days": days, "totals": {}, "by_day": [], "by_model": [], "by_operation": []}
+
+        facets = result[0]
+        totals_raw = facets["totals"][0] if facets["totals"] else {}
+        totals_raw.pop("_id", None)
+
+        return {
+            "period_days": days,
+            "totals": totals_raw or {"total_calls": 0, "total_tokens": 0, "total_cost_usd": 0.0},
+            "by_day": [{"date": d["_id"], "requests": d["requests"], "cost_usd": d["cost_usd"]} for d in facets["by_day"]],
+            "by_model": [{"model": d["_id"], "requests": d["requests"], "cost_usd": d["cost_usd"]} for d in facets["by_model"]],
+            "by_operation": [{"operation": d["_id"], "requests": d["requests"], "tokens": d["tokens"], "cost_usd": d["cost_usd"]} for d in facets["by_operation"]],
+        }
