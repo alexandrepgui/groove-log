@@ -67,7 +67,7 @@ export default function LoginPage() {
           <img src={logoIcon} alt="" className="login-icon" />
           <img src={logoImg} alt="groove log" className="login-wordmark" />
         </div>
-        <p className="login-subtitle">Identify your vinyl and CDs from label photos</p>
+        <p className="login-subtitle">Your records, identified.</p>
 
         <form onSubmit={handleSubmit} className="login-form">
           <input

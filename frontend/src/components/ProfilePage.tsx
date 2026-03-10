@@ -84,6 +84,12 @@ export default function ProfilePage() {
     const file = e.target.files?.[0];
     if (!file || !user) return;
 
+    const MAX_AVATAR_SIZE = 10 * 1024 * 1024; // 10 MB
+    if (file.size > MAX_AVATAR_SIZE) {
+      setError('Avatar image must be under 10 MB.');
+      return;
+    }
+
     setUploading(true);
     setError(null);
     try {

@@ -21,6 +21,11 @@ export default function ImageUpload({ onFileSelected, onClear, isLoading, mediaT
       alert('Please upload a JPEG or PNG image.');
       return;
     }
+    const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
+    if (file.size > MAX_IMAGE_SIZE) {
+      alert('Image must be under 5 MB.');
+      return;
+    }
     setStagedFile(file);
     setPreview(URL.createObjectURL(file));
   }, []);

@@ -19,6 +19,11 @@ export default function BatchUpload({ onBatchCreated, mediaType = 'vinyl' }: Pro
         setError('Please upload a .zip file containing JPEG or PNG images.');
         return;
       }
+      const MAX_ZIP_SIZE = 750 * 1024 * 1024; // 750 MB
+      if (file.size > MAX_ZIP_SIZE) {
+        alert('ZIP file must be under 750 MB.');
+        return;
+      }
       setError(null);
       setIsUploading(true);
 

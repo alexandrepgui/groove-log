@@ -73,7 +73,7 @@ export default function IssuesView() {
     return (
       <div className="batch-summary">
         <h3>No issues</h3>
-        <p>No wrong matches or errors to show.</p>
+        <p>No issues — everything looks good.</p>
       </div>
     );
   }

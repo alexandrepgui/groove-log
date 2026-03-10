@@ -15,12 +15,6 @@ import CollectionView from './components/CollectionView';
 import ProfilePage from './components/ProfilePage';
 import vinylIcon from './assets/vinyl.svg';
 import cdIcon from './assets/cd.svg';
-import singleSearchIcon from './assets/single-search.svg';
-import batchIcon from './assets/batch.svg';
-import reviewIcon from './assets/review.svg';
-import issuesIcon from './assets/issues.svg';
-import collectionIcon from './assets/collection.svg';
-import profileIcon from './assets/profile.svg';
 import logoImg from './assets/logo.svg';
 import logoIcon from './assets/icon.svg';
 
@@ -77,8 +71,7 @@ function SingleSearchPage() {
     return (
       <div>
         <p className="batch-instructions">
-          Upload a single photo of your disc (JPEG or PNG).
-          First, select the media type:
+          Upload a photo of your record label to identify it.
         </p>
         <MediaTypeSelector onSelect={setMediaType} />
       </div>
@@ -105,7 +98,7 @@ function SingleSearchPage() {
       {isLoading && (
         <div className="loading">
           <div className="spinner" />
-          <p>Analyzing image and searching Discogs... This may take up to 30 seconds.</p>
+          <p>Analyzing image and searching Discogs...</p>
           <button className="btn btn-cancel" onClick={handleCancel}>
             Cancel
           </button>
@@ -160,50 +153,53 @@ function AppInner() {
 
   return (
     <div className="app">
-      <nav className="mode-tabs">
-        <NavLink to="/" end className={({ isActive }) => `mode-tab${isActive ? ' active' : ''}`}>
-          <img src={singleSearchIcon} alt="" className="tab-icon" />
-          Single Search
+      <nav className="app-navbar">
+        <NavLink to="/" className="navbar-logo">
+          <img src={logoIcon} alt="" className="navbar-icon" />
+          <img src={logoImg} alt="groove log" className="navbar-wordmark" />
         </NavLink>
-        <NavLink to="/batch" className={({ isActive }) => `mode-tab${isActive ? ' active' : ''}`}>
-          <img src={batchIcon} alt="" className="tab-icon" />
-          Batch
-        </NavLink>
-        <NavLink to="/review" className={({ isActive }) => `mode-tab${isActive ? ' active' : ''}`}>
-          <img src={reviewIcon} alt="" className="tab-icon" />
-          Review
-        </NavLink>
-        <NavLink to="/issues" className={({ isActive }) => `mode-tab${isActive ? ' active' : ''}`}>
-          <img src={issuesIcon} alt="" className="tab-icon" />
-          Issues
-        </NavLink>
-        <NavLink to="/collection" className={({ isActive }) => `mode-tab${isActive ? ' active' : ''}`}>
-          <img src={collectionIcon} alt="" className="tab-icon" />
-          Collection
-        </NavLink>
-        <NavLink to="/profile" className={({ isActive }) => `mode-tab${isActive ? ' active' : ''}`}>
-          <img src={profileIcon} alt="" className="tab-icon" />
-          Profile
-        </NavLink>
+
+        <div className="navbar-links">
+          <NavLink to="/identify" className="nav-link">
+            Identify
+          </NavLink>
+          <NavLink to="/collection" className="nav-link">
+            Collection
+          </NavLink>
+          <NavLink to="/review" className="nav-link">
+            Review
+          </NavLink>
+          <NavLink to="/issues" className="nav-link">
+            Issues
+          </NavLink>
+        </div>
+
+        <div className="navbar-spacer" />
+
+        <div className="navbar-actions">
+          <NavLink to="/profile" className="nav-avatar-btn" title="Profile">
+            <span className="nav-avatar-fallback">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+            </span>
+          </NavLink>
+        </div>
       </nav>
 
-      <header className="app-header">
-        <div className="app-logo-row">
-          <img src={logoIcon} alt="" className="app-icon" />
-          <img src={logoImg} alt="groove log" className="app-logo" />
-        </div>
-        <p>Identify your records by photo</p>
-      </header>
-
-      <Routes>
-        <Route path="/" element={<SingleSearchPage />} />
-        <Route path="/batch" element={<BatchView onGoToReview={() => navigate('/review')} />} />
-        <Route path="/review" element={<ReviewView />} />
-        <Route path="/issues" element={<IssuesView />} />
-        <Route path="/collection" element={<CollectionView />} />
-        <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/login" element={<Navigate to="/" replace />} />
-      </Routes>
+      <div className="route-content">
+        <Routes>
+          <Route path="/" element={<Navigate to="/collection" replace />} />
+          <Route path="/identify" element={<SingleSearchPage />} />
+          <Route path="/batch" element={<BatchView onGoToReview={() => navigate('/review')} />} />
+          <Route path="/review" element={<ReviewView />} />
+          <Route path="/issues" element={<IssuesView />} />
+          <Route path="/collection" element={<CollectionView />} />
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/login" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
     </div>
   );
 }

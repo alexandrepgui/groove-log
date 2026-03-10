@@ -155,8 +155,8 @@ export default function CollectionView({ readOnly = false, username }: Collectio
       return;
     }
     const containerWidth = container.clientWidth;
-    const gap = 16; // 1rem gap
-    const preferredCardWidth = 180; // px
+    const gap = 20; // 1.25rem gap
+    const preferredCardWidth = 220; // px
     const maxCols = Math.max(1, Math.floor((containerWidth + gap) / (preferredCardWidth + gap)));
     const optimal = computeOptimalColumns(itemCountRef.current, maxCols);
     setGridColumns(optimal);
@@ -303,10 +303,15 @@ export default function CollectionView({ readOnly = false, username }: Collectio
   const handleCopyLink = () => {
     if (!discogsUsername) return;
     const url = `${window.location.origin}/collection/${discogsUsername}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 2000);
-    });
+    navigator.clipboard.writeText(url).then(
+      () => {
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      },
+      () => {
+        setError('Failed to copy link to clipboard.');
+      },
+    );
   };
 
   // Landing: never synced and not currently syncing (only for authenticated view)
@@ -451,7 +456,7 @@ export default function CollectionView({ readOnly = false, username }: Collectio
 
       {!loading && !error && items.length === 0 && (
         <p className="no-results">
-          {search ? 'No items match your search.' : 'Your collection is empty.'}
+          {search ? 'No items match your search.' : 'No records yet. Sync from Discogs to get started.'}
         </p>
       )}
 

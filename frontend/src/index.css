@@ -1,3 +1,28 @@
+/* ── Theme tokens ─────────────────────────────────────────────────────── */
+:root {
+  --bg:             #F4E3CD;
+  --bg-glass:       rgba(244, 227, 205, 0.85);
+  --surface:        #ECD5B8;
+  --text-primary:   #1A1520;
+  --text-secondary: #5C4F6A;
+  --border:         #D9C5A8;
+  --accent:         #2B1BDF;
+  --accent-text:    #2717B0;
+  --accent-hover:   #3D2EF0;
+  --accent-subtle:  rgba(43, 27, 223, 0.08);
+  --on-accent:      #F4E3CD;
+  --danger:         #F31C05;
+  --danger-subtle:  rgba(243, 28, 5, 0.08);
+  --on-danger:      #FFFFFF;
+  --success:        #6B8F5E;
+  --success-subtle: rgba(107, 143, 94, 0.10);
+  --shadow-card:    0 1px 3px rgba(26, 23, 20, 0.06);
+  --shadow-hover:   0 4px 16px rgba(26, 23, 20, 0.10);
+  --shadow-modal:   0 8px 32px rgba(26, 23, 20, 0.18);
+  --overlay:        rgba(26, 23, 20, 0.50);
+}
+
+/* ── Global reset ──────────────────────────────────────────────────────── */
 *,
 *::before,
 *::after {
@@ -6,6 +31,19 @@
 
 body {
   margin: 0;
-  background: #fff;
+  background: var(--bg);
+  color: var(--text-primary);
   min-height: 100vh;
+}
+
+/* ── Accessible focus ──────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Page entrance ─────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }

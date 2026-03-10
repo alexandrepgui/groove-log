@@ -41,8 +41,8 @@ export default function ReviewView() {
   if (items.length === 0) {
     return (
       <div className="batch-summary">
-        <h3>Nothing to review</h3>
-        <p>Upload images via Single Search or Batch to get started.</p>
+        <h3>All caught up</h3>
+        <p>All caught up. Upload photos to identify more records.</p>
       </div>
     );
   }
