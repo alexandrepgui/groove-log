@@ -301,9 +301,10 @@ export default function CollectionView({ readOnly = false, username }: Collectio
   const handleCopyLink = () => {
     if (!discogsUsername) return;
     const url = `${window.location.origin}/collection/${discogsUsername}`;
-    navigator.clipboard.writeText(url).then(() => {
-      showToast('Link copied');
-    });
+    navigator.clipboard.writeText(url).then(
+      () => showToast('Link copied'),
+      () => showToast("Couldn't copy link", 'error'),
+    );
   };
 
   // Landing: never synced and not currently syncing (only for authenticated view)
@@ -436,7 +437,7 @@ export default function CollectionView({ readOnly = false, username }: Collectio
       )}
 
       {loading && (
-        <div className="collection-grid collection-skeleton-grid" aria-hidden="true" ref={gridRef}>
+        <div className="collection-grid" aria-hidden="true" ref={gridRef}>
           {Array.from({ length: Math.min(pageSize, 25) }, (_, i) => (
             <div key={i} className="collection-card skeleton-card">
               <div className="skeleton-cover skeleton-shimmer" />

@@ -16,10 +16,7 @@ import CollectionView from './components/CollectionView';
 import ProfilePage from './components/ProfilePage';
 import vinylIcon from './assets/vinyl.svg';
 import cdIcon from './assets/cd.svg';
-import singleSearchIcon from './assets/single-search.svg';
-import batchIcon from './assets/batch.svg';
-import reviewIcon from './assets/review.svg';
-import issuesIcon from './assets/issues.svg';
+import { SingleSearchIcon, BatchIcon, ReviewIcon, IssuesIcon } from './components/Icons';
 import logoImg from './assets/logo.svg';
 import logoIcon from './assets/icon.svg';
 
@@ -124,6 +121,9 @@ function SingleSearchPage() {
   );
 }
 
+const subtabClass = ({ isActive }: { isActive: boolean }) =>
+  `identify-subtab${isActive ? ' active' : ''}`;
+
 function IdentifyPage() {
   const navigate = useNavigate();
   const [reviewCount, setReviewCount] = useState(0);
@@ -150,21 +150,21 @@ function IdentifyPage() {
   return (
     <div className="identify-page">
       <div className="identify-subtabs">
-        <NavLink to="/identify" end className={({ isActive }) => `identify-subtab${isActive ? ' active' : ''}`}>
-          <img src={singleSearchIcon} alt="" className="subtab-icon" />
+        <NavLink to="/identify" end className={subtabClass}>
+          <SingleSearchIcon className="subtab-icon" aria-hidden="true" />
           Search
         </NavLink>
-        <NavLink to="/identify/batch" className={({ isActive }) => `identify-subtab${isActive ? ' active' : ''}`}>
-          <img src={batchIcon} alt="" className="subtab-icon" />
+        <NavLink to="/identify/batch" className={subtabClass}>
+          <BatchIcon className="subtab-icon" aria-hidden="true" />
           Batch
         </NavLink>
-        <NavLink to="/identify/review" className={({ isActive }) => `identify-subtab${isActive ? ' active' : ''}`}>
-          <img src={reviewIcon} alt="" className="subtab-icon" />
+        <NavLink to="/identify/review" className={subtabClass}>
+          <ReviewIcon className="subtab-icon" aria-hidden="true" />
           Review
           {reviewCount > 0 && <span className="subtab-badge">{reviewCount}</span>}
         </NavLink>
-        <NavLink to="/identify/issues" className={({ isActive }) => `identify-subtab${isActive ? ' active' : ''}`}>
-          <img src={issuesIcon} alt="" className="subtab-icon" />
+        <NavLink to="/identify/issues" className={subtabClass}>
+          <IssuesIcon className="subtab-icon" aria-hidden="true" />
           Issues
           {issuesCount > 0 && <span className="subtab-badge">{issuesCount}</span>}
         </NavLink>

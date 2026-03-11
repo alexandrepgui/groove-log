@@ -27,8 +27,7 @@ from services.discogs_auth import (
 log = get_logger("routes.discogs_oauth")
 
 # Hosts allowed for redirect URLs.  Extend with your production domain(s).
-ALLOWED_FRONTEND_HOSTS: set[str] = {"localhost", "127.0.0.1"}
-ALLOWED_CALLBACK_HOSTS: set[str] = {"localhost", "127.0.0.1"}
+ALLOWED_REDIRECT_HOSTS: set[str] = {"localhost", "127.0.0.1"}
 
 _DEFAULT_FRONTEND_URL = "http://localhost:5173"
 _DEFAULT_CALLBACK_URL: str | None = None  # fall back to request.url_for()
@@ -46,11 +45,8 @@ def validate_redirect_url(
     """
     try:
         parsed = urlparse(url)
-        if parsed.scheme == "https":
-            return parsed.hostname in allowed_hosts
-        if parsed.scheme == "http" and allow_http:
-            return parsed.hostname in allowed_hosts
-        return False
+        allowed_schemes = {"https"} | ({"http"} if allow_http else set())
+        return parsed.scheme in allowed_schemes and parsed.hostname in allowed_hosts
     except Exception:
         return False
 
@@ -85,7 +81,7 @@ async def discogs_login(
         )
 
     callback_url = os.getenv("OAUTH_CALLBACK_URL") or _DEFAULT_CALLBACK_URL
-    if callback_url and not validate_redirect_url(callback_url, ALLOWED_CALLBACK_HOSTS, allow_http=True):
+    if callback_url and not validate_redirect_url(callback_url, ALLOWED_REDIRECT_HOSTS, allow_http=True):
         log.warning("Invalid OAUTH_CALLBACK_URL ignored: %s", callback_url)
         callback_url = None
     # Fall back to auto-detected callback from the request
@@ -135,7 +131,7 @@ async def discogs_callback(
 
     # Redirect back to the frontend app
     frontend_url = os.getenv("FRONTEND_URL", _DEFAULT_FRONTEND_URL)
-    if not validate_redirect_url(frontend_url, ALLOWED_FRONTEND_HOSTS, allow_http=True):
+    if not validate_redirect_url(frontend_url, ALLOWED_REDIRECT_HOSTS, allow_http=True):
         log.warning("Invalid FRONTEND_URL ignored: %s", frontend_url)
         frontend_url = _DEFAULT_FRONTEND_URL
     return RedirectResponse(url=frontend_url)

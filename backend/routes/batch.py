@@ -21,6 +21,7 @@ log = get_logger("routes.batch")
 
 router = APIRouter()
 
+_PIPELINE_ERROR_MSG = "Something went wrong processing this image. Try again?"
 VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 _EXT_TO_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
 
@@ -80,7 +81,7 @@ def _process_batch(
             repo.increment_batch_failed(batch_id)
         except Exception as e:
             log.error("Batch item %s failed: %s", item_id, e, exc_info=True)
-            repo.update_item_error(item_id, "Something went wrong processing this image. Try again?")
+            repo.update_item_error(item_id, _PIPELINE_ERROR_MSG)
             repo.increment_batch_failed(batch_id)
             record.status = "error_pipeline"
         finally:
