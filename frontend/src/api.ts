@@ -287,3 +287,13 @@ export async function discogsLogout(): Promise<void> {
   const resp = await authFetch('/api/discogs/logout', { method: 'POST' });
   if (!resp.ok) throw new Error('Couldn\'t disconnect from Discogs. Try again?');
 }
+
+// ── Discogs URL helpers ────────────────────────────────────────────────────
+
+export function getDiscogsReleaseUrl(releaseId: number): string {
+  return `https://www.discogs.com/release/${releaseId}`;
+}
+
+export function getDiscogsMarketplaceUrl(releaseId: number): string {
+  return `https://www.discogs.com/sell/list?release_id=${releaseId}`;
+}

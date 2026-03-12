@@ -24,6 +24,9 @@ async def get_profile(
     repo: MongoRepository = Depends(get_repo),
 ):
     """Return the authenticated user's profile and Discogs connection status."""
+    # Keep avatar_url in user_settings so the public collection endpoint can use it
+    if user.avatar_url:
+        repo.update_user_settings(user.id, {"avatar_url": user.avatar_url})
     saved = repo.load_oauth_tokens(user.id)
     return {
         "user_id": user.id,

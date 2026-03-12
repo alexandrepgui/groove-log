@@ -158,5 +158,8 @@ async def public_collection(
         raise HTTPException(status_code=404, detail="Collection not found.")
 
     result = _paginated_collection(repo, user_id, page, per_page, sort, sort_order, q)
-    result["owner"] = {"username": username}
+    result["owner"] = {
+        "username": username,
+        "avatar_url": settings.get("avatar_url"),
+    }
     return result

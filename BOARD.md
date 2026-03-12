@@ -24,48 +24,6 @@
 
 ---
 
-### T16: Collection Page - Grouping Options
-
-**Goal:** Add grouping options to collection page allowing users to group records by artist, country, or genre. Ensure groups are not broken across page boundaries.
-
-**Details:**
-- Add group selector (dropdown or tabs): Artist / Country / Genre / None
-- When grouped, records display in sections with headers for each group
-- Pagination must respect group boundaries - don't split a group across pages
-- Group headers should show group name and record count
-- Maintain existing search and sort functionality (sorting may be disabled when grouped by certain fields)
-- Store group preference in localStorage
-
-**Files to modify:**
-- `frontend/src/components/CollectionView.tsx` — group state, grouping logic, section rendering
-- `frontend/src/App.css` — group header styles
-- `frontend/src/api.ts` — may need new query params for grouped fetching
-- `frontend/src/types.ts` — update CollectionResponse types if needed
-
----
-
-### T17: Collection Page - Record Card Context Menu
-
-**Goal:** When clicking on a record card (outside the cover image area), open a context menu/dialog with options like delete, view on Discogs, view pricing, etc.
-
-**Details:**
-- Click anywhere on card except cover image opens action dialog
-- Dialog options:
-  - View on Discogs (opens new tab to Discogs release page)
-  - View Pricing (opens Discogs marketplace pricing)
-  - Delete from Collection (opens confirmation, then deletes)
-  - Cancel
-- Dialog should show record title/artist for context
-- Maintain existing multi-select behavior (checkbox in corner unaffected)
-- Style dialog as modal with backdrop blur
-
-**Files to modify:**
-- `frontend/src/components/CollectionView.tsx` — click handler, dialog state, dialog component
-- `frontend/src/App.css` — context menu dialog styles
-- `frontend/src/api.ts` — Discogs URL helpers if needed
-
----
-
 ### T9: Configure Supabase Cloud & Google OAuth (Manual)
 
 **Goal:** Set up production-ready Supabase project with Google sign-in provider. This is a manual task — no code changes needed.
@@ -96,7 +54,62 @@ _(empty)_
 
 ## Awaiting Validation
 
-_(empty)_
+### T16: Collection Page - Grouping Options
+
+**Goal:** Add grouping options to collection page allowing users to group records by artist or genre. Ensure groups are not broken across page boundaries.
+
+**Details:**
+- Add group selector (dropdown): Artist / Genre / None
+- When grouped, records display in sections with headers for each group
+- Pagination must respect group boundaries - don't split a group across pages
+- Group headers should show group name and record count
+- Sorting disabled when grouped
+- Store group preference in localStorage
+- Debounced group changes for performance
+- Shows limit notice when collection exceeds 250 items (client-side grouping limit)
+
+**Files modified:**
+- `frontend/src/components/CollectionView.tsx` — added `currentGroups` state for storing paginated groups; added `loadGroup()` (localStorage), `GROUP_OPTIONS` (Artist/Genre/None), `CollectionGroup` interface; added `getGroupKey()` (Artist/Genre only), `groupItems()`, `getPaginatedGroups()`, `calculateTotalPages()` helper functions; added `groupTimerRef` for debouncing; added `handleGroupChange()` with 150ms debounce; updated `fetchCollection()` to fetch all items and compute groups client-side when grouping; updated effect to compute page groups when page/pageSize changes; updated controls to include group selector with disabled sort; updated rendering to use `currentGroups` directly (avoids re-grouping); added group limit notice for 250+ items; fixed `handleDeleteSelected()` and `handleDeleteConfirm()` to pass `group` parameter
+- `frontend/src/App.css` — added `.collection-group`, `.collection-group-header`, `.collection-group-name`, `.collection-group-count`, `.collection-group-select`, `.collection-limit-notice` styles
+
+---
+
+### T15: Update Navbar - Logo/Brand Left, Profile Picture Right
+
+**Goal:** Move logo and app name to the left side of the navbar. Replace current logo position with user's profile picture. Clicking logo/brand should redirect to home page.
+
+**Details:**
+- Navbar left side: app icon + "groove log" wordmark (lower case) side by side
+- Navbar right side: user's profile avatar (circular, with hover effect)
+- Logo/brand link should navigate to "/" (home/identify page)
+- Profile avatar maintains existing click behavior (goes to /profile)
+- Navbar content is truly left-aligned (breaks out of centered `.app` container)
+
+**Files modified:**
+- `frontend/src/App.tsx` — navbar now uses `icon.svg` (standalone icon) + text span for "groove log" wordmark (lower case, matches login page); `logo.svg` retained for public collection page header (`/collection/:username`) only
+- `frontend/src/App.css` — updated `.navbar-wordmark` to style text with Shrikhand font (1.75rem, letter-spacing); added `left: 0; right: 0; width: 100vw;` to `.app-navbar` for true left-alignment; updated mobile responsive font-size (1.4rem)
+
+---
+
+### T17: Collection Page - Record Card Context Menu
+
+**Goal:** When clicking on a record card (outside the cover image area), open a context menu/dialog with options like delete, view on Discogs, view pricing, etc.
+
+**Details:**
+- Click anywhere on card except cover image opens action dialog
+- Dialog options:
+  - View on Discogs (opens new tab to Discogs release page)
+  - View Pricing (opens Discogs marketplace pricing)
+  - Delete from Collection (opens confirmation, then deletes)
+  - Cancel
+- Dialog should show record title/artist for context
+- Maintain existing multi-select behavior (checkbox in corner unaffected)
+- Style dialog as modal with backdrop blur
+
+**Files modified:**
+- `frontend/src/components/CollectionView.tsx` — added context menu state (`showContextMenu`, `contextItem`, `showDeleteConfirm`), card click handler (`handleCardClick`), dialog handlers (`handleViewOnDiscogs`, `handleViewPricing`, `handleDeleteFromCollection`, `handleDeleteConfirm`), context menu dialog component, delete confirmation dialog for single item, `collection-cover-wrapper` with `onClickCapture` to prevent opening menu
+- `frontend/src/App.css` — added `.collection-cover-wrapper`, `.context-menu-overlay`, `.context-menu`, `.context-menu-title`, `.context-menu-subtitle`, `.context-menu-actions`, `.context-menu-item`, `.context-menu-item-danger`, `.context-menu-divider` styles with backdrop blur
+- `frontend/src/api.ts` — added `getDiscogsReleaseUrl()` and `getDiscogsMarketplaceUrl()` helper functions
 
 ---
 

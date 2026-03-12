@@ -186,9 +186,12 @@ function PublicCollectionPage() {
   if (!username) return <p className="error">We need a username to show this collection.</p>;
   return (
     <div className="app public-collection-page">
-      <header className="app-header">
-        <img src={logoIcon} alt="groove log" className="app-icon" />
-      </header>
+      <nav className="app-navbar">
+        <div className="navbar-logo">
+          <img src={logoIcon} alt="" className="navbar-icon" />
+          <span className="navbar-wordmark">groove log</span>
+        </div>
+      </nav>
       <CollectionView readOnly username={username} />
     </div>
   );
@@ -235,7 +238,8 @@ function AppInner() {
     <div className="app">
       <nav className="app-navbar">
         <NavLink to="/" className="navbar-logo">
-          <img src={logoIcon} alt="groove log" className="navbar-icon" />
+          <img src={logoIcon} alt="" className="navbar-icon" />
+          <span className="navbar-wordmark">groove log</span>
         </NavLink>
 
         <div className="navbar-links">

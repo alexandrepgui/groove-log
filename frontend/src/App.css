@@ -24,12 +24,15 @@ h2, h3 {
 .app-navbar {
   position: sticky;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: 100;
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem clamp(1rem, 4vw, 5rem);
-  margin: 0 calc(-1 * clamp(1rem, 4vw, 5rem));
+  margin: 0 calc(-1 * clamp(1rem, 4vw, 5rem)) 1.5rem;
+  width: 100vw;
   background: var(--bg-glass);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(12px);
@@ -52,8 +55,11 @@ h2, h3 {
 }
 
 .navbar-wordmark {
-  height: 1.75rem;
-  /* colors set directly in SVG */
+  font-family: 'Shrikhand', cursive, system-ui, sans-serif;
+  font-size: 1.35rem;
+  font-weight: 400;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
 .navbar-links {
@@ -232,6 +238,12 @@ h2, h3 {
 
 .app-icon {
   height: 5rem;
+  width: auto;
+  /* colors set directly in SVG */
+}
+
+.app-icon-full {
+  height: 4rem;
   width: auto;
   /* colors set directly in SVG */
 }
@@ -1155,6 +1167,43 @@ h2, h3 {
   padding: 0 0.25rem;
 }
 
+/* ── Collection grouping ─────────────────────────────────────────────── */
+
+.collection-group {
+  margin-bottom: 2.5rem;
+}
+
+.collection-group:last-child {
+  margin-bottom: 0;
+}
+
+.collection-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0.25rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.collection-group-name {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.collection-group-count {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.collection-limit-notice {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 /* Grid — album art hero treatment */
 .collection-grid {
   display: grid;
@@ -1178,6 +1227,11 @@ h2, h3 {
 }
 
 /* Square album art — no rounded corners */
+.collection-cover-wrapper {
+  width: 100%;
+  aspect-ratio: 1;
+}
+
 .collection-cover {
   width: 100%;
   aspect-ratio: 1;
@@ -1307,6 +1361,16 @@ h2, h3 {
   font-family: inherit;
 }
 
+.collection-group-select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
 .collection-resync {
   padding: 0.45rem 0.75rem;
   font-size: 0.82rem;
@@ -1422,6 +1486,81 @@ h2, h3 {
   opacity: 0.9;
 }
 
+/* ── Context menu dialog ───────────────────────────────────────────────── */
+
+.context-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+
+.context-menu {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 1.5rem;
+  max-width: 360px;
+  width: 90%;
+  box-shadow: var(--shadow-modal);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.context-menu-title {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0 0 0.25rem;
+  word-break: break-word;
+}
+
+.context-menu-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin: 0 0 1.25rem;
+}
+
+.context-menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.context-menu-item {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  padding: 0.625rem 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  font-family: inherit;
+  transition: background-color 0.15s ease;
+}
+
+.context-menu-item:hover {
+  background: var(--surface-hover);
+}
+
+.context-menu-item-danger {
+  color: var(--danger);
+}
+
+.context-menu-item-danger:hover {
+  background: var(--danger-bg);
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.25rem 0;
+}
+
 /* ── Lightbox ──────────────────────────────────────────────────────────── */
 
 .lightbox-overlay {
@@ -1470,10 +1609,19 @@ h2, h3 {
 
 .login-logo {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.25rem;
   margin-bottom: 0.75rem;
+}
+
+.login-title {
+  font-family: 'Shrikhand', cursive, system-ui, sans-serif;
+  font-size: 1.5rem;
+  font-weight: 400;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
 .login-icon {
@@ -1543,6 +1691,11 @@ h2, h3 {
   color: var(--text-secondary);
   display: flex;
   align-items: center;
+}
+
+.password-toggle svg {
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .password-toggle:hover {
@@ -1851,6 +2004,20 @@ h2, h3 {
 
 /* ── Public collection header ──────────────────────────────────────────── */
 
+.public-collection-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.public-collection-avatar {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 .public-collection-owner {
   margin: 0;
   padding: 0 0 0.25rem;
@@ -1862,11 +2029,6 @@ h2, h3 {
 
 .public-collection-username {
   color: var(--accent-text);
-}
-
-.public-collection-page .app-header {
-  margin-bottom: 0.5rem;
-  padding-top: 1.5rem;
 }
 
 /* ── Copy link button ──────────────────────────────────────────────────── */
@@ -2011,7 +2173,7 @@ h2, h3 {
   }
 
   .navbar-wordmark {
-    display: none;
+    font-size: 1.15rem;
   }
 
   .navbar-links {

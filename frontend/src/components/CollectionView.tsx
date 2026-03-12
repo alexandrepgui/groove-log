@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { deleteCollectionItems, getCollection, getCollectionSyncStatus, getProfile, getPublicCollection, getSettings, triggerCollectionSync } from '../api';
+import { deleteCollectionItems, getCollection, getCollectionSyncStatus, getDiscogsMarketplaceUrl, getDiscogsReleaseUrl, getProfile, getPublicCollection, getSettings, triggerCollectionSync } from '../api';
 import type { CollectionItem, SyncStatus } from '../types';
 import { useToast } from './Toast';
 import ZoomableImage from './ZoomableImage';
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 150, 200, 250];
 const PAGE_SIZE_KEY = 'groove-log-page-size';
+const GROUP_KEY = 'groove-log-group';
 
 function loadPageSize(): number {
   try {
@@ -16,6 +17,28 @@ function loadPageSize(): number {
     }
   } catch { /* ignore */ }
   return 50;
+}
+
+function loadGroup(): string {
+  try {
+    const stored = localStorage.getItem(GROUP_KEY);
+    if (stored && ['artist', 'format', 'none'].includes(stored)) {
+      return stored;
+    }
+  } catch { /* ignore */ }
+  return 'none';
+}
+
+const GROUP_OPTIONS = [
+  { value: 'none', label: 'No Grouping' },
+  { value: 'artist', label: 'Artist' },
+  { value: 'format', label: 'Media Type' },
+];
+
+interface CollectionGroup {
+  name: string;
+  count: number;
+  items: CollectionItem[];
 }
 
 const SORT_OPTIONS = [
@@ -32,7 +55,10 @@ interface CollectionViewProps {
 }
 
 export default function CollectionView({ readOnly = false, username }: CollectionViewProps) {
+  const [allItems, setAllItems] = useState<CollectionItem[]>([]);
   const [items, setItems] = useState<CollectionItem[]>([]);
+  // Store current page's groups for rendering (avoids re-grouping on each render)
+  const [currentGroups, setCurrentGroups] = useState<CollectionGroup[]>([]);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
@@ -42,14 +68,21 @@ export default function CollectionView({ readOnly = false, username }: Collectio
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(loadPageSize);
+  const [group, setGroup] = useState(loadGroup);
 
   // Public collection owner info
   const [ownerName, setOwnerName] = useState<string | null>(null);
+  const [ownerAvatar, setOwnerAvatar] = useState<string | null>(null);
 
   // Selection state (only used when not readOnly)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Context menu state
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [contextItem, setContextItem] = useState<CollectionItem | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Copy link state (only used in authenticated view)
   const [collectionPublic, setCollectionPublic] = useState(false);
@@ -62,6 +95,7 @@ export default function CollectionView({ readOnly = false, username }: Collectio
   const [initialCheckDone, setInitialCheckDone] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const groupTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   // Debounced search value actually sent to the API
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -92,34 +126,147 @@ export default function CollectionView({ readOnly = false, username }: Collectio
   const hasSynced = readOnly ? true : syncStatus?.completed_at != null;
   const isSyncing = readOnly ? false : syncStatus?.status === 'syncing';
 
+  // Grouping: sort items into groups by the specified field
+  const getGroupKey = useCallback((item: CollectionItem, groupBy: string): string => {
+    switch (groupBy) {
+      case 'artist':
+        return item.artist || 'Unknown Artist';
+      case 'format':
+        return item.format || 'Unknown Format';
+      default:
+        return 'none';
+    }
+  }, []);
+
+  const groupItems = useCallback((itemsToGroup: CollectionItem[], groupBy: string): CollectionGroup[] => {
+    if (groupBy === 'none') return [];
+
+    const groups = new Map<string, CollectionItem[]>();
+    for (const item of itemsToGroup) {
+      const key = getGroupKey(item, groupBy);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(item);
+    }
+
+    return Array.from(groups.entries())
+      .map(([name, items]) => ({ name, count: items.length, items }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [getGroupKey]);
+
+  // Get paginated groups respecting group boundaries
+  const getPaginatedGroups = useCallback((groups: CollectionGroup[], pageNum: number, itemsPerPage: number): CollectionGroup[] => {
+    if (groups.length === 0) return [];
+
+    let currentPage = 1;
+    let currentCount = 0;
+    const pageGroups: CollectionGroup[] = [];
+
+    for (const group of groups) {
+      // Add the entire group to current page
+      pageGroups.push(group);
+      currentCount += group.count;
+
+      // Check if we've reached or exceeded the page size
+      // When that happens, if this is NOT the target page, clear and move on
+      if (currentCount >= itemsPerPage && currentPage < pageNum) {
+        pageGroups.length = 0;
+        currentCount = 0;
+        currentPage++;
+      }
+
+      // If we've reached the target page, stop here
+      if (currentPage === pageNum && currentCount >= itemsPerPage) {
+        break;
+      }
+    }
+
+    return pageGroups;
+  }, []);
+
+  // Calculate total pages for grouped view
+  const calculateTotalPages = useCallback((groups: CollectionGroup[], itemsPerPage: number): number => {
+    if (groups.length === 0) return 1;
+    let currentPage = 1;
+    let currentCount = 0;
+
+    for (const group of groups) {
+      currentCount += group.count;
+      if (currentCount >= itemsPerPage) {
+        currentPage++;
+        currentCount = 0;
+      }
+    }
+
+    return currentPage;
+  }, []);
+
   // Fetch from local DB
   const fetchCollection = useCallback(
-    async (p: number, ps: number, s: string, so: string, q: string) => {
+    async (p: number, ps: number, s: string, so: string, q: string, groupBy: string) => {
       setLoading(true);
       setError(null);
       try {
+        // When grouping is enabled, fetch all items (up to max limit)
+        // Note: For collections larger than 250 items, server-side grouping would be needed
+        const fetchPage = groupBy !== 'none' ? 1 : p;
+        const fetchPerPage = groupBy !== 'none' ? 250 : ps;
+
         const data = readOnly && username
-          ? await getPublicCollection(username, p, ps, s, so, q)
-          : await getCollection(p, ps, s, so, q);
-        setItems(data.items);
-        setPage(data.page);
-        setPages(data.pages);
-        setTotalItems(data.total_items);
-        if ('owner' in data) setOwnerName(data.owner.username);
+          ? await getPublicCollection(username, fetchPage, fetchPerPage, s, so, q)
+          : await getCollection(fetchPage, fetchPerPage, s, so, q);
+
+        setAllItems(data.items);
+        setPage(fetchPage);
+
+        if (groupBy !== 'none') {
+          // Compute groups and page groups client-side
+          const groups = groupItems(data.items, groupBy);
+          const pageGroups = getPaginatedGroups(groups, 1, ps);
+          setCurrentGroups(pageGroups);
+          // Calculate total pages based on grouping
+          const totalPages = calculateTotalPages(groups, ps);
+          setPages(totalPages);
+          setTotalItems(data.total_items);
+        } else {
+          setCurrentGroups([]);
+          setItems(data.items);
+          setPage(data.page);
+          setPages(data.pages);
+          setTotalItems(data.total_items);
+        }
+        if ('owner' in data) {
+          setOwnerName(data.owner.username);
+          setOwnerAvatar(data.owner.avatar_url ?? null);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Couldn\'t load the collection. Try refreshing?');
       } finally {
         setLoading(false);
       }
     },
-    [readOnly, username],
+    [readOnly, username, groupItems, getPaginatedGroups, calculateTotalPages],
   );
 
   // Load collection when ready and when params change
   useEffect(() => {
     if (!hasSynced || isSyncing) return;
-    fetchCollection(page, pageSize, sort, sortOrder, debouncedSearch);
-  }, [hasSynced, isSyncing, page, pageSize, sort, sortOrder, debouncedSearch, fetchCollection]);
+    fetchCollection(page, pageSize, sort, sortOrder, debouncedSearch, group);
+  }, [hasSynced, isSyncing, page, pageSize, sort, sortOrder, debouncedSearch, group, fetchCollection]);
+
+  // Update page groups when page or pageSize changes in grouped mode
+  useEffect(() => {
+    if (group !== 'none' && allItems.length > 0) {
+      const groups = groupItems(allItems, group);
+      const pageGroups = getPaginatedGroups(groups, page, pageSize);
+      setCurrentGroups(pageGroups);
+      // Calculate total pages based on grouping
+      const totalPages = calculateTotalPages(groups, pageSize);
+      setPages(totalPages);
+    } else if (group === 'none') {
+      setCurrentGroups([]);
+      // Items are already set by fetchCollection
+    }
+  }, [page, pageSize, group, allItems, groupItems, getPaginatedGroups, calculateTotalPages]);
 
 
   // Debounce search input
@@ -182,10 +329,20 @@ export default function CollectionView({ readOnly = false, username }: Collectio
     setPage(1);
   };
 
-  // Clear selection when page/search/sort changes
+  const handleGroupChange = (newGroup: string) => {
+    // Debounce group changes to avoid rapid re-fetches
+    if (groupTimerRef.current) clearTimeout(groupTimerRef.current);
+    groupTimerRef.current = setTimeout(() => {
+      setGroup(newGroup);
+      setPage(1);
+      try { localStorage.setItem(GROUP_KEY, newGroup); } catch { /* ignore */ }
+    }, 150);
+  };
+
+  // Clear selection when page/search/sort/group changes
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [page, pageSize, sort, sortOrder, debouncedSearch]);
+  }, [page, pageSize, sort, sortOrder, debouncedSearch, group]);
 
   const toggleSelect = (instanceId: number) => {
     setSelectedIds((prev) => {
@@ -220,10 +377,53 @@ export default function CollectionView({ readOnly = false, username }: Collectio
       setSelectedIds(new Set());
       setShowDeleteModal(false);
       // Refresh the current page
-      fetchCollection(page, pageSize, sort, sortOrder, debouncedSearch);
+      fetchCollection(page, pageSize, sort, sortOrder, debouncedSearch, group);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Delete failed.', 'error');
       setShowDeleteModal(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Context menu handlers
+  const handleCardClick = (item: CollectionItem) => {
+    setContextItem(item);
+    setShowContextMenu(true);
+  };
+
+  const handleViewOnDiscogs = () => {
+    if (contextItem) {
+      window.open(getDiscogsReleaseUrl(contextItem.release_id), '_blank');
+    }
+    setShowContextMenu(false);
+  };
+
+  const handleViewPricing = () => {
+    if (contextItem) {
+      window.open(getDiscogsMarketplaceUrl(contextItem.release_id), '_blank');
+    }
+    setShowContextMenu(false);
+  };
+
+  const handleDeleteFromCollection = () => {
+    setShowContextMenu(false);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!contextItem) return;
+    setDeleting(true);
+    try {
+      const result = await deleteCollectionItems([contextItem.instance_id]);
+      if (result.deleted > 0) {
+        showToast(`Deleted "${contextItem.title}"`);
+      }
+      setShowDeleteConfirm(false);
+      // Refresh the current page
+      fetchCollection(page, pageSize, sort, sortOrder, debouncedSearch, group);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Delete failed.', 'error');
     } finally {
       setDeleting(false);
     }
@@ -295,7 +495,12 @@ export default function CollectionView({ readOnly = false, username }: Collectio
   return (
     <div className="collection-view">
       {readOnly && ownerName && (
-        <h2 className="public-collection-owner"><span className="public-collection-username">{ownerName}</span>'s collection</h2>
+        <div className="public-collection-header">
+          {ownerAvatar && (
+            <img src={ownerAvatar} alt="" className="public-collection-avatar" />
+          )}
+          <h2 className="public-collection-owner"><span className="public-collection-username">{ownerName}</span>'s collection</h2>
+        </div>
       )}
 
       <div className="collection-controls">
@@ -311,6 +516,7 @@ export default function CollectionView({ readOnly = false, username }: Collectio
             value={sort}
             onChange={(e) => handleSortChange(e.target.value)}
             className="collection-sort-select"
+            disabled={group !== 'none'}
           >
             {SORT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -318,10 +524,27 @@ export default function CollectionView({ readOnly = false, username }: Collectio
               </option>
             ))}
           </select>
-          <button className="btn collection-sort-order" onClick={toggleSortOrder}>
+          <button
+            className="btn collection-sort-order"
+            onClick={toggleSortOrder}
+            disabled={group !== 'none'}
+            title={group !== 'none' ? 'Sorting disabled when grouped' : 'Toggle sort order'}
+          >
             {sortOrder === 'asc' ? '\u2191' : '\u2193'}
           </button>
         </div>
+        <select
+          className="collection-group-select"
+          value={group}
+          onChange={(e) => handleGroupChange(e.target.value)}
+          title="Group records by"
+        >
+          {GROUP_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
         <select
           className="collection-page-size-select"
           value={pageSize}
@@ -402,48 +625,113 @@ export default function CollectionView({ readOnly = false, username }: Collectio
         <>
           <div className="collection-info">
             {totalItems} item{totalItems !== 1 ? 's' : ''} in collection
+            {group !== 'none' && allItems.length >= 250 && (
+              <span className="collection-limit-notice"> (showing first 250 items when grouped)</span>
+            )}
           </div>
-          <div className="collection-grid">
-            {items.map((item) => (
-              <div
-                key={`${item.release_id}-${item.instance_id}`}
-                className={`collection-card${!readOnly && selectedIds.has(item.instance_id) ? ' collection-card-selected' : ''}`}
-              >
-                {!readOnly && (
-                  <label className="collection-card-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(item.instance_id)}
-                      onChange={() => toggleSelect(item.instance_id)}
-                    />
-                  </label>
-                )}
-                {item.cover_image ? (
-                  <ZoomableImage
-                    src={item.cover_image}
-                    alt={item.title}
-                    className="collection-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="collection-cover collection-cover-placeholder" role="img" aria-label="No cover available">
-                    <div className="collection-cover-placeholder-icon" aria-hidden="true" />
+          {group !== 'none' ? (
+            // Grouped display
+            <>
+              {currentGroups.map((grp) => (
+                <div key={grp.name} className="collection-group">
+                  <div className="collection-group-header">
+                    <h3 className="collection-group-name">{grp.name}</h3>
+                    <span className="collection-group-count">{grp.count} record{grp.count !== 1 ? 's' : ''}</span>
                   </div>
-                )}
-                <div className="collection-card-info">
-                  <div className="collection-card-title">{item.title}</div>
-                  <div className="collection-card-artist">{item.artist}</div>
-                  <div className="collection-card-meta">
-                    {item.year > 0 && <span>{item.year}</span>}
-                    {item.format && <span>{item.format}</span>}
-                    {item.genres.slice(0, 2).map((g) => (
-                      <span key={g}>{g}</span>
+                  <div className="collection-grid">
+                    {grp.items.map((item) => (
+                      <div
+                        key={`${item.release_id}-${item.instance_id}`}
+                        className={`collection-card${!readOnly && selectedIds.has(item.instance_id) ? ' collection-card-selected' : ''}`}
+                        onClick={() => handleCardClick(item)}
+                      >
+                        {!readOnly && (
+                          <label className="collection-card-checkbox" onClickCapture={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(item.instance_id)}
+                              onChange={() => toggleSelect(item.instance_id)}
+                            />
+                          </label>
+                        )}
+                        {item.cover_image ? (
+                          <div className="collection-cover-wrapper" onClickCapture={(e) => e.stopPropagation()}>
+                            <ZoomableImage
+                              src={item.cover_image}
+                              alt={item.title}
+                              className="collection-cover"
+                              loading="lazy"
+                            />
+                          </div>
+                        ) : (
+                          <div className="collection-cover collection-cover-placeholder" role="img" aria-label="No cover available" onClickCapture={(e) => e.stopPropagation()}>
+                            <div className="collection-cover-placeholder-icon" aria-hidden="true" />
+                          </div>
+                        )}
+                        <div className="collection-card-info">
+                          <div className="collection-card-title">{item.title}</div>
+                          <div className="collection-card-artist">{item.artist}</div>
+                          <div className="collection-card-meta">
+                            {item.year > 0 && <span>{item.year}</span>}
+                            {item.format && <span>{item.format}</span>}
+                            {item.genres.slice(0, 2).map((g) => (
+                              <span key={g}>{g}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </>
+          ) : (
+            // Standard grid display
+            <div className="collection-grid">
+              {items.map((item) => (
+                <div
+                  key={`${item.release_id}-${item.instance_id}`}
+                  className={`collection-card${!readOnly && selectedIds.has(item.instance_id) ? ' collection-card-selected' : ''}`}
+                  onClick={() => handleCardClick(item)}
+                >
+                  {!readOnly && (
+                    <label className="collection-card-checkbox" onClickCapture={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(item.instance_id)}
+                        onChange={() => toggleSelect(item.instance_id)}
+                      />
+                    </label>
+                  )}
+                  {item.cover_image ? (
+                    <div className="collection-cover-wrapper" onClickCapture={(e) => e.stopPropagation()}>
+                      <ZoomableImage
+                        src={item.cover_image}
+                        alt={item.title}
+                        className="collection-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                  ) : (
+                    <div className="collection-cover collection-cover-placeholder" role="img" aria-label="No cover available" onClickCapture={(e) => e.stopPropagation()}>
+                      <div className="collection-cover-placeholder-icon" aria-hidden="true" />
+                    </div>
+                  )}
+                  <div className="collection-card-info">
+                    <div className="collection-card-title">{item.title}</div>
+                    <div className="collection-card-artist">{item.artist}</div>
+                    <div className="collection-card-meta">
+                      {item.year > 0 && <span>{item.year}</span>}
+                      {item.format && <span>{item.format}</span>}
+                      {item.genres.slice(0, 2).map((g) => (
+                        <span key={g}>{g}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {pages > 1 && (
             <div className="collection-pagination">
@@ -488,6 +776,68 @@ export default function CollectionView({ readOnly = false, username }: Collectio
               <button
                 className="btn btn-delete-confirm"
                 onClick={handleDeleteSelected}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Context menu for individual record card */}
+      {showContextMenu && contextItem && (
+        <div className="context-menu-overlay" onClick={() => setShowContextMenu(false)}>
+          <div className="context-menu" onClick={(e) => e.stopPropagation()}>
+            <h3 className="context-menu-title">{contextItem.title}</h3>
+            <p className="context-menu-subtitle">{contextItem.artist}</p>
+            <div className="context-menu-actions">
+              <button className="context-menu-item" onClick={handleViewOnDiscogs}>
+                View on Discogs
+              </button>
+              <button className="context-menu-item" onClick={handleViewPricing}>
+                View Pricing
+              </button>
+              {!readOnly && (
+                <>
+                  <div className="context-menu-divider" />
+                  <button
+                    className="context-menu-item context-menu-item-danger"
+                    onClick={handleDeleteFromCollection}
+                  >
+                    Delete from Collection
+                  </button>
+                </>
+              )}
+              <div className="context-menu-divider" />
+              <button className="context-menu-item" onClick={() => setShowContextMenu(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation for single item */}
+      {!readOnly && showDeleteConfirm && contextItem && (
+        <div className="delete-modal-overlay" onClick={() => !deleting && setShowDeleteConfirm(false)}>
+          <div className="delete-modal" onClick={(e) => e.stopPropagation()}>
+            <p className="delete-modal-warning">
+              Are you sure you want to delete <strong>"{contextItem.title}"</strong> by {contextItem.artist}
+              from your collection? This will also remove it from your Discogs account.
+              This action cannot be undone.
+            </p>
+            <div className="delete-modal-actions">
+              <button
+                className="btn btn-nav"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-delete-confirm"
+                onClick={handleDeleteConfirm}
                 disabled={deleting}
               >
                 {deleting ? 'Deleting...' : 'Delete'}

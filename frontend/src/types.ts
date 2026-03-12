@@ -100,6 +100,7 @@ export interface UserSettings {
 export interface PublicCollectionResponse {
   owner: {
     username: string;
+    avatar_url?: string | null;
   };
   items: CollectionItem[];
   page: number;
