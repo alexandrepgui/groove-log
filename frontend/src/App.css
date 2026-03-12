@@ -1649,12 +1649,12 @@ h2, h3 {
 }
 
 .login-card {
-  background: var(--surface);
-  border-radius: 12px;
+  background: none;
+  border-radius: 0;
   padding: 2.5rem 2rem;
   width: 100%;
   max-width: 380px;
-  box-shadow: var(--shadow-modal);
+  box-shadow: none;
   text-align: center;
 }
 
@@ -1669,14 +1669,14 @@ h2, h3 {
 
 .login-title {
   font-family: 'Shrikhand', cursive, system-ui, sans-serif;
-  font-size: 1.5rem;
+  font-size: 2.5rem;
   font-weight: 400;
   color: var(--text-primary);
   letter-spacing: -0.02em;
 }
 
 .login-icon {
-  height: 3.5rem;
+  height: 5rem;
   width: auto;
   /* colors set directly in SVG */
 }
