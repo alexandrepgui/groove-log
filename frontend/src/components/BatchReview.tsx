@@ -79,7 +79,7 @@ function DebugPanel({ debug, strategy, labelData }: { debug: DebugInfo; strategy
 
 export default function BatchReview({ items, onDone }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   // Track items acted on in this session: item_id -> action
   const [acted, setActed] = useState<Map<string, 'accepted' | 'skipped' | 'wrong'>>(new Map());
@@ -102,7 +102,7 @@ export default function BatchReview({ items, onDone }: Props) {
     setTransitioning(true);
     setTimeout(() => {
       setCurrentIndex(nextIndex);
-      setExpanded(false);
+      setExpanded(true);
       setTransitioning(false);
     }, 180);
   }, [currentIndex]);
@@ -145,7 +145,7 @@ export default function BatchReview({ items, onDone }: Props) {
         }
       }
       setActed((prev) => new Map(prev).set(item.item_id, action));
-      setExpanded(false);
+      setExpanded(true);
       // Auto-advance to next item with slide transition
       if (safeIndex < completedItems.length - 1) {
         navigate(safeIndex + 1);
@@ -179,7 +179,7 @@ export default function BatchReview({ items, onDone }: Props) {
         for (const ri of reviewable) next.set(ri.item_id, 'skipped');
         return next;
       });
-      setExpanded(false);
+      setExpanded(true);
     } finally {
       setActionLoading(false);
     }
@@ -209,7 +209,7 @@ export default function BatchReview({ items, onDone }: Props) {
         for (const ri of reviewable) next.set(ri.item_id, 'accepted');
         return next;
       });
-      setExpanded(false);
+      setExpanded(true);
     } finally {
       setActionLoading(false);
     }
@@ -357,7 +357,7 @@ export default function BatchReview({ items, onDone }: Props) {
                       disabled={actionLoading}
                       onClick={() => handleAction('accepted', r.discogs_id!)}
                     >
-                      Pick this
+                      Accept + Add
                     </button>
                   )}
                 </>
