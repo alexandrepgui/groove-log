@@ -8,9 +8,9 @@ from config import SINGLE_SEARCH_BATCH_ID
 from deps import get_repo
 from logger import get_logger
 from models import AddToCollectionRequest, MediaType, SearchResponse
-from repository import BatchItem, CollectionRecord, SearchRecord
+from repository import BatchItem, CollectionItem, CollectionRecord, SearchRecord
 from repository.mongo import MongoRepository
-from services.discogs import add_to_collection, get_marketplace_stats
+from services.discogs import add_to_collection, get_marketplace_stats, get_master_cover, get_release
 from services.discogs_auth import require_discogs_tokens
 from services.search import process_single_image
 from utils import save_upload_image
@@ -147,6 +147,40 @@ async def add_to_collection_endpoint(
         log.error("Failed to save collection record: %s", e, exc_info=True)
 
     log.info("Release %d added to collection: instance_id=%s", body.release_id, instance.get("instance_id"))
+
+    # Sync the new item into the local collection immediately
+    try:
+        release = get_release(body.release_id, tokens)
+        artists = ", ".join(a.get("name", "") for a in release.get("artists", []))
+        formats = release.get("formats", [])
+        format_name = formats[0].get("name", "") if formats else ""
+        cover = release.get("cover_image") or release.get("thumb") or None
+        master_id = release.get("master_id")
+
+        if master_id:
+            master_cover = get_master_cover(master_id, tokens)
+            if master_cover:
+                cover = master_cover
+
+        item = CollectionItem(
+            user_id=user.id,
+            instance_id=instance.get("instance_id", 0),
+            release_id=body.release_id,
+            title=release.get("title", ""),
+            artist=artists,
+            year=release.get("year", 0),
+            genres=release.get("genres", []),
+            styles=release.get("styles", []),
+            format=format_name,
+            cover_image=cover,
+            master_id=master_id,
+            date_added=instance.get("date_added"),
+        )
+        repo.upsert_collection_items_bulk([item])
+        log.info("Synced new collection item locally: instance_id=%s", instance.get("instance_id"))
+    except Exception as e:
+        log.warning("Failed to sync new item locally (will appear after next full sync): %s", e)
+
     return instance
 
 

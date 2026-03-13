@@ -84,6 +84,8 @@ export default function BatchReview({ items, onDone }: Props) {
   // Track items acted on in this session: item_id -> action
   const [acted, setActed] = useState<Map<string, 'accepted' | 'skipped' | 'wrong'>>(new Map());
   const [cardHeight, setCardHeight] = useState<number | undefined>(undefined);
+  const [transitioning, setTransitioning] = useState(false);
+  const [slideDir, setSlideDir] = useState<'left' | 'right'>('left');
   const observerRef = useRef<ResizeObserver | null>(null);
   const cardRef = useCallback((node: HTMLDivElement | null) => {
     if (observerRef.current) observerRef.current.disconnect();
@@ -93,6 +95,17 @@ export default function BatchReview({ items, onDone }: Props) {
       observerRef.current.observe(node);
     }
   }, []);
+
+  const navigate = useCallback((nextIndex: number) => {
+    const dir = nextIndex > currentIndex ? 'left' : 'right';
+    setSlideDir(dir);
+    setTransitioning(true);
+    setTimeout(() => {
+      setCurrentIndex(nextIndex);
+      setExpanded(false);
+      setTransitioning(false);
+    }, 180);
+  }, [currentIndex]);
 
   const completedItems = items.filter((i) => i.status === 'completed' && i.review_status === 'unreviewed');
   const reviewable = completedItems.filter((i) => !acted.has(i.item_id));
@@ -133,9 +146,9 @@ export default function BatchReview({ items, onDone }: Props) {
       }
       setActed((prev) => new Map(prev).set(item.item_id, action));
       setExpanded(false);
-      // Auto-advance to next item
+      // Auto-advance to next item with slide transition
       if (safeIndex < completedItems.length - 1) {
-        setCurrentIndex((i) => i + 1);
+        navigate(safeIndex + 1);
       }
     } finally {
       setActionLoading(false);
@@ -226,7 +239,7 @@ export default function BatchReview({ items, onDone }: Props) {
         )}
       </div>
 
-      <div className="batch-review-main">
+      <div className={`batch-review-main ${transitioning ? (slideDir === 'left' ? 'batch-slide-out-left' : 'batch-slide-out-right') : 'batch-slide-in'}`}>
         {topResult ? (
           <div ref={cardRef} style={{ flex: 1, minWidth: 0 }}>
             <ResultCard
@@ -260,8 +273,8 @@ export default function BatchReview({ items, onDone }: Props) {
         <div className="batch-review-actions-row">
           <button
             className="btn btn-nav"
-            disabled={safeIndex === 0}
-            onClick={() => { setCurrentIndex((i) => i - 1); setExpanded(false); }}
+            disabled={safeIndex === 0 || transitioning}
+            onClick={() => navigate(safeIndex - 1)}
           >
             &lt;
           </button>
@@ -282,14 +295,14 @@ export default function BatchReview({ items, onDone }: Props) {
             <>
               <button
                 className="btn btn-wrong"
-                disabled={actionLoading}
+                disabled={actionLoading || transitioning}
                 onClick={() => handleAction('wrong')}
               >
                 Wrong
               </button>
               <button
                 className="btn btn-dismiss"
-                disabled={actionLoading}
+                disabled={actionLoading || transitioning}
                 onClick={() => handleAction('skipped')}
               >
                 Dismiss
@@ -297,7 +310,7 @@ export default function BatchReview({ items, onDone }: Props) {
               {topResult?.discogs_id && (
                 <button
                   className="btn btn-collection"
-                  disabled={actionLoading}
+                  disabled={actionLoading || transitioning}
                   onClick={() => handleAction('accepted', topResult.discogs_id!)}
                 >
                   {actionLoading ? 'Adding...' : 'Accept + Add'}
@@ -307,8 +320,8 @@ export default function BatchReview({ items, onDone }: Props) {
           )}
           <button
             className="btn btn-nav"
-            disabled={safeIndex >= completedItems.length - 1}
-            onClick={() => { setCurrentIndex((i) => i + 1); setExpanded(false); }}
+            disabled={safeIndex >= completedItems.length - 1 || transitioning}
+            onClick={() => navigate(safeIndex + 1)}
           >
             &gt;
           </button>
@@ -325,8 +338,8 @@ export default function BatchReview({ items, onDone }: Props) {
         )}
       </div>
 
-      {!itemAction && expanded && item.results && (
-        <div className="batch-expanded-results">
+      {!itemAction && item.results && item.results.length > 1 && (
+        <div className={`batch-expanded-results ${expanded ? 'expanded-visible' : ''}`}>
           {item.results.slice(1).map((r, i) => (
             <ResultCard
               key={`${r.discogs_id}-${i}`}

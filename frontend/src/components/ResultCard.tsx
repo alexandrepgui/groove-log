@@ -91,6 +91,9 @@ export default function ResultCard({ result, itemId, renderActions, className }:
           ) : price?.lowest_price != null ? (
             <span className="result-price">From {price.lowest_price.toFixed(2)} {price.currency ?? ''} ({price.num_for_sale} for sale)</span>
           ) : null}
+          {result.is_master_fallback && (
+            <span className="result-master-badge">Master release — exact pressing not found</span>
+          )}
         </div>
 
         {renderActions ? (
@@ -120,7 +123,7 @@ export default function ResultCard({ result, itemId, renderActions, className }:
                     See in Discogs
                   </a>
                 )}
-                {result.discogs_id && (
+                {result.discogs_id && !result.is_master_fallback && (
                   <button
                     className={`btn btn-collection ${status}`}
                     disabled={status === 'loading'}

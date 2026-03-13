@@ -39,6 +39,8 @@ export interface DiscogsResult {
   catno: string | null;
   discogs_url: string | null;
   cover_image: string | null;
+  master_id: number | null;
+  is_master_fallback: boolean;
 }
 
 export interface DebugInfo {
@@ -69,6 +71,7 @@ export interface CollectionItem {
   styles: string[];
   format: string;
   cover_image: string | null;
+  master_id: number | null;
   date_added: string | null;
 }
 

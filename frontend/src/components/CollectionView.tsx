@@ -663,10 +663,11 @@ export default function CollectionView({ readOnly = false, username }: Collectio
                     <span className="collection-group-count">{grp.count} record{grp.count !== 1 ? 's' : ''}</span>
                   </div>
                   <div className="collection-grid">
-                    {grp.items.map((item) => (
+                    {grp.items.map((item, i) => (
                       <div
                         key={`${item.release_id}-${item.instance_id}`}
                         className={`collection-card${!readOnly && selectedIds.has(item.instance_id) ? ' collection-card-selected' : ''}`}
+                        style={{ animationDelay: `${Math.min(i * 20, 400)}ms` }}
                         onClick={() => handleCardClick(item)}
                       >
                         {!readOnly && (
@@ -712,10 +713,11 @@ export default function CollectionView({ readOnly = false, username }: Collectio
           ) : (
             // Standard grid display
             <div className="collection-grid">
-              {items.map((item) => (
+              {items.map((item, i) => (
                 <div
                   key={`${item.release_id}-${item.instance_id}`}
                   className={`collection-card${!readOnly && selectedIds.has(item.instance_id) ? ' collection-card-selected' : ''}`}
+                  style={{ animationDelay: `${Math.min(i * 20, 400)}ms` }}
                   onClick={() => handleCardClick(item)}
                 >
                   {!readOnly && (
