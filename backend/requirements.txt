@@ -9,3 +9,4 @@ PyJWT[crypto]
 pytest
 pytest-cov
 httpx
+pillow
