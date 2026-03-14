@@ -8,6 +8,36 @@
 
 ## Backlog
 
+### T22: Move PDF Generation to Frontend (@react-pdf/renderer)
+
+**Goal:** Offload PDF catalog generation from the backend (WeasyPrint) to the frontend using `@react-pdf/renderer`, eliminating server CPU/memory pressure and the heavy native WeasyPrint dependency.
+
+**Why:**
+- WeasyPrint is CPU/memory intensive on the server (Pango/Cairo native libs, image downloading, HTML rendering)
+- Cover images are already loaded/cached in the browser from the collection grid — no need to re-download on the server
+- Scales better: each user's browser does its own rendering instead of the server handling all exports
+- Removes a heavy native dependency from the backend
+
+**Details:**
+- Replace `backend/services/export.py` PDF path with a frontend-only flow
+- Use `@react-pdf/renderer` (React components → vector PDF, supports custom fonts and page breaks)
+- Rewrite the PDF template in `<Document>`, `<Page>`, `<View>`, `<Text>`, `<Image>` primitives (not CSS — Yoga layout engine)
+- Replicate: title page with stats, format grouping, record cards with cover art, page numbers, custom fonts (Shrikhand, DM Sans, JetBrains Mono)
+- Keep CSV/Excel export on the backend (lightweight, no benefit from moving)
+- Remove WeasyPrint and Pillow from `backend/requirements.txt` once PDF backend path is removed
+- Keep the spinning vinyl loading dialog (already in frontend)
+
+**Files to create/modify:**
+- `frontend/package.json` — add `@react-pdf/renderer`
+- `frontend/src/services/pdfExport.tsx` (create) — PDF document component and generation logic
+- `frontend/src/components/CollectionView.tsx` — call frontend PDF generator instead of backend export API for PDF format
+- `frontend/src/api.ts` — remove PDF from `exportCollection` (keep CSV/XLSX)
+- `backend/services/export.py` — remove `generate_pdf`, `_download_cover_b64`, `_download_all_covers`, and related helpers
+- `backend/routes/export.py` — remove PDF from supported formats
+- `backend/requirements.txt` — remove `weasyprint` (keep `pillow` if used elsewhere)
+
+---
+
 ### T15: Update Navbar - Logo/Brand Left, Profile Picture Right
 
 **Goal:** Move logo and app name to the left side of the navbar. Replace current logo position with user's profile picture. Clicking logo/brand should redirect to home page.
